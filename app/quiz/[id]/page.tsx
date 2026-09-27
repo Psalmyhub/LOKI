@@ -1,21 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   connectWallet,
+  getCurrentQuestion,
   getEvaluation,
-  getNextQuestionId,
+  getPlayer,
+  getPlayerCount,
   getPlayerStatus,
   getQuestion,
+  getQuestionId,
   getQuiz,
   joinQuiz,
   submitAnswer,
-  QUIZAMBIG_OWNER,
   type Evaluation,
   type Question,
   type Quiz,
 } from "../../../lib/quizambig";
+
+type Row = {
+  player: string;
+  correct: boolean;
+  pending: boolean;
+  response: number;
+};
 
 export default function QuizPage({ params }: { params: Promise<{ id: string }> }) {
   const [quiz, setQuiz] = useState<Quiz | null>(null);
@@ -25,9 +34,11 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
   const [answer, setAnswer] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
+  const [leaderboard, setLeaderboard] = useState<Row[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [secondsLeft, setSecondsLeft] = useState(0);
 
   useEffect(() => {
     void (async () => {
@@ -41,7 +52,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
           const address = await connectWallet().catch(() => "");
           if (address) {
             setWallet(address);
-            const status = await getPlayerStatus(quizId, address);
+            const status = await getPlayerStatus(quizId, address as `0x${string}`);
             setJoined(status.joined);
           }
         }
@@ -50,6 +61,71 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
       }
     })();
   }, [params]);
+
+  async function refreshQuestion() {
+    if (!quiz) return;
+    try {
+      const q = await getCurrentQuestion(quiz.id);
+      setQuestion(q);
+      setSecondsLeft(Math.max(0, q.deadline - Math.floor(Date.now() / 1000)));
+    } catch {
+      setQuestion(null);
+    }
+  }
+
+  async function refreshLeaderboard(questionId: number) {
+    if (!quiz) return;
+    const count = await getPlayerCount(quiz.id);
+    const rows: Row[] = [];
+    for (let i = 0; i < count; i++) {
+      const player = await getPlayer(quiz.id, i);
+      try {
+        const result = await getEvaluation(questionId, player as `0x${string}`);
+        rows.push({
+          player,
+          correct: result.correct,
+          pending: result.status !== "FINALIZED",
+          response: result.response_time_seconds,
+        });
+      } catch {
+        rows.push({ player, correct: false, pending: true, response: Number.MAX_SAFE_INTEGER });
+      }
+    }
+    rows.sort((a, b) => {
+      if (a.correct !== b.correct) return a.correct ? -1 : 1;
+      return a.response - b.response;
+    });
+    setLeaderboard(rows);
+  }
+
+  async function refreshEvaluation() {
+    if (!question || !wallet) return;
+    try {
+      const result = await getEvaluation(question.id, wallet as `0x${string}`);
+      setEvaluation(result);
+      setSubmitted(true);
+    } catch {}
+  }
+
+  useEffect(() => {
+    if (!quiz) return;
+    const timer = window.setInterval(() => {
+      void refreshQuestion();
+      if (question) {
+        void refreshEvaluation();
+        void refreshLeaderboard(question.id);
+      }
+    }, 2500);
+    void refreshQuestion();
+    return () => window.clearInterval(timer);
+  }, [quiz, question?.id, wallet]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setSecondsLeft(value => Math.max(0, value - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   async function connect() {
     if (!quiz) return;
@@ -69,28 +145,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
     try {
       await joinQuiz(quiz.id);
       setJoined(true);
-      setQuiz({ ...quiz, status: "ACTIVE" });
       setMessage("Joined on-chain.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally { setBusy(false); }
-  }
-
-  async function loadQuestion() {
-    if (!quiz) return;
-    setBusy(true); setError("");
-    try {
-      const next = await getNextQuestionId();
-      for (let id = 1; id < next; id++) {
-        try {
-          const q = await getQuestion(id);
-          if (Number(q.quiz_id) === quiz.id && (q.status === "ACTIVE" || q.status === "PUBLISHED")) {
-            setQuestion(q);
-            return;
-          }
-        } catch {}
-      }
-      throw new Error("No active question is available yet. The Quiz Master must start a question.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
@@ -102,24 +157,15 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
     try {
       await submitAnswer(question.id, answer.trim());
       setSubmitted(true);
-      setMessage("Answer submitted on-chain. The authoritative evaluation becomes available after the question is closed and the master answer is revealed.");
-      if (wallet) {
-        const poll = window.setInterval(async () => {
-          try {
-            const result = await getEvaluation(question.id, wallet as `0x${string}`);
-            setEvaluation(result);
-            if (result.status === "FINALIZED") window.clearInterval(poll);
-          } catch {}
-        }, 5000);
-        window.setTimeout(() => window.clearInterval(poll), 120000);
-      }
+      setAnswer("");
+      setMessage("Answer recorded. The quiz continues immediately; GenLayer evaluation may finish after the next question begins.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
   }
 
-  const isQuizMaster = Boolean(wallet && quiz && wallet.toLowerCase() === quiz.master.toLowerCase());
-  const isLockedOwner = Boolean(wallet && wallet.toLowerCase() === QUIZAMBIG_OWNER.toLowerCase());
+  const isQuestionOpen = Boolean(question && secondsLeft > 0);
+  const myRow = useMemo(() => leaderboard.find(r => r.player.toLowerCase() === wallet.toLowerCase()), [leaderboard, wallet]);
 
   return (
     <main className="shell">
@@ -138,71 +184,76 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
         <>
           <section className="quizHeader">
             <div className="eyebrow">{quiz.status} · Quiz #{quiz.id}</div>
-            <h1>{quiz.title || "Untitled quiz"}</h1>
+            <h1>{quiz.title}</h1>
             <div className="meta">
               <span className="badge">{quiz.question_count} questions</span>
-              <span className="badge">Master {quiz.master.slice(0, 8)}…</span>
+              {question && <span className="badge">Question {question.index + 1}</span>}
             </div>
           </section>
 
-          <section className="card">
-            {!joined && quiz.status === "PUBLISHED" && (
-              <>
-                <h2>Join this quiz</h2>
-                <p className="muted">Your wallet will be recorded on-chain. You cannot submit until you have joined.</p>
-                <button className="primary" disabled={busy} onClick={join}>{busy ? "Joining…" : "Join quiz"}</button>
-              </>
-            )}
-
-            {joined && (
-              <>
-                <h2>Player area</h2>
-                <p className="muted">You are registered for this quiz.</p>
-                <button className="secondary" disabled={busy} onClick={loadQuestion}>{busy ? "Loading…" : "Load active question"}</button>
-              </>
-            )}
-
-            {question && (
-              <>
-                <div className="question">
-                  <div className="small">Question</div>
-                  {question.question_text}
-                </div>
-                <div className="meta">
-                  <span className="badge">Question #{question.id}</span>
-                  <span className="badge">{question.answer_mode}</span>
-                  <span className="badge">{question.final_time}s</span>
-                  <span className="badge">{question.status}</span>
-                </div>
-                <div className="field">
-                  <label htmlFor="answer">Your answer</label>
-                  <textarea id="answer" className="answerBox" value={answer} onChange={e => setAnswer(e.target.value)} disabled={submitted} />
-                </div>
-                <button className="primary" disabled={busy || submitted || !answer.trim()} onClick={submit}>
-                  {busy ? "Submitting…" : submitted ? "Submitted" : "Submit answer"}
-                </button>
-              </>
-            )}
-
-            {evaluation && (
-              <div className="result">
-                <div className="small">Authoritative contract result</div>
-                <div className="score">{evaluation.semantic_score}%</div>
-                <strong>{evaluation.correct ? "Correct" : "Incorrect"}</strong>
-                <span className="muted">Status: {evaluation.status}</span>
-              </div>
-            )}
-          </section>
-
-          {isQuizMaster && (
-            <section className="section card">
-              <h2>Quiz Master</h2>
-              <p className="muted">This wallet is the Quiz Master recorded on-chain.</p>
+          {!joined && quiz.status === "ACTIVE" && (
+            <section className="card">
+              <h2>Join this quiz</h2>
+              <p className="muted">Join once. The blockchain schedule controls every question automatically.</p>
+              <button className="primary" disabled={busy} onClick={join}>{busy ? "Joining…" : "Join quiz"}</button>
             </section>
           )}
 
-          {isLockedOwner && !isQuizMaster && (
-            <p className="small">Connected wallet matches the locked deployment owner address.</p>
+          {joined && question && (
+            <section className="card">
+              <div className="meta">
+                <span className="badge">Question {question.index + 1}</span>
+                <span className="badge">{question.duration}s</span>
+                <span className="badge">{question.answer_mode}</span>
+              </div>
+              <div className="timer">{secondsLeft}s</div>
+              <div className="question">{question.question_text}</div>
+              <div className="field">
+                <label htmlFor="answer">Your answer</label>
+                <textarea id="answer" className="answerBox" value={answer} onChange={e => setAnswer(e.target.value)} disabled={!isQuestionOpen || submitted} />
+              </div>
+              <button className="primary" disabled={busy || !isQuestionOpen || submitted || !answer.trim()} onClick={submit}>
+                {submitted ? "Submitted" : busy ? "Submitting…" : "Submit answer"}
+              </button>
+              {evaluation && (
+                <div className="result">
+                  <div className="small">GenLayer judgment</div>
+                  <div className="score">{evaluation.correct ? "Correct" : "Incorrect"}</div>
+                  <span className="muted">Semantic score: {evaluation.semantic_score}% · response: {evaluation.response_time_seconds}s</span>
+                </div>
+              )}
+            </section>
+          )}
+
+          {joined && !question && quiz.status === "COMPLETED" && (
+            <section className="card"><h2>Quiz complete</h2><p className="muted">The final judgments may continue arriving after the quiz has ended.</p></section>
+          )}
+
+          {joined && (
+            <section className="section card">
+              <div className="sectionHeading">
+                <div><div className="stepLabel">Leaderboard</div><h2>Question results</h2></div>
+                {myRow && <span className="badge">{myRow.correct ? "Correct" : myRow.pending ? "Judging…" : "Incorrect"}</span>}
+              </div>
+              <p className="muted">Correct answers are ordered first; speed breaks ties. Pending GenLayer judgments do not stop the next question.</p>
+              {leaderboard.length === 0 ? <p className="muted">Waiting for submissions…</p> : (
+                <div className="draftList">
+                  {leaderboard.map((row, index) => (
+                    <div className="card" key={row.player}>
+                      <div className="sectionHeading">
+                        <strong>#{index + 1} {row.player.slice(0, 8)}…{row.player.slice(-6)}</strong>
+                        <span className="badge">{row.pending ? "Judging…" : row.correct ? "Correct" : "Incorrect"}</span>
+                      </div>
+                      <span className="muted">{row.pending ? "GenLayer review pending" : `${row.response}s response time`}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {wallet && wallet.toLowerCase() === quiz.master.toLowerCase() && (
+            <p className="small">Quiz Master automation is running while this page is open. No per-question publishing action is required.</p>
           )}
         </>
       )}
