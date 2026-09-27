@@ -11,6 +11,7 @@ import {
   getCurrentQuestion,
   getEvaluation,
   getNextQuizId,
+  getQuestionId,
   getPlayer,
   getPlayerCount,
   getQuestion,
@@ -124,10 +125,7 @@ export default function MasterPage() {
 
     const playerCount = await getPlayerCount(quiz.id);
     for (let index = 0; index < quiz.question_count; index++) {
-      const q = await getQuestion(await (async () => {
-        const { getQuestionId } = await import("../../lib/quizambig");
-        return getQuestionId(quiz.id, index);
-      })());
+      const q = await getQuestion(await getQuestionId(quiz.id, index));
       if (q.status !== "CLOSED") continue;
       const secret = secrets[String(index)];
       if (!secret) continue;
