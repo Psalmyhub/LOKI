@@ -126,7 +126,7 @@ class Quizambig(gl.Contract):
             return "ACTIVE"
         return "CLOSED"
 
-    def _answer_commitment    def _answer_commitment(self, answer: str, salt: str, answer_mode: str) -> str:
+    def _answer_commitment(self, answer: str, salt: str, answer_mode: str) -> str:
         payload = (answer + ":" + salt + ":" + answer_mode).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
@@ -227,15 +227,6 @@ class Quizambig(gl.Contract):
             "correct": self.evaluation_correct[key],
             "response_time_seconds": self.submission_response_time[key],
             "submitted_at": self.submission_time[key],
-        }
-
-    @gl.public.view
-    def get_player_status(self, quiz_id: u32, player: Address) -> dict:
-        self._require_quiz_exists(quiz_id)
-        return {
-            "joined": self.player_joined[self._player_key(quiz_id, player)],
-            "quiz_id": quiz_id,
-            "player": player.as_hex,
         }
 
     @gl.public.view
