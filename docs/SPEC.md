@@ -56,7 +56,7 @@ GenLayer evaluation is asynchronous from the quiz schedule.
 
 A question ending does not wait for GenLayer. The frontend can immediately move players to the next scheduled question while prior submissions remain pending.
 
-The Quiz Master frontend automatically triggers pending evaluations after a question closes using the locally retained master answer/salt needed to verify the commitment.
+The Quiz Master frontend automatically triggers pending evaluations as soon as a submission exists using the locally retained master answer/salt needed to verify the commitment.
 
 Leaderboard rows therefore support a Judging… state. Once GenLayer finalizes a judgment, the leaderboard refreshes without interrupting the current question.
 
@@ -72,7 +72,7 @@ Pending GenLayer judgments never block question progression.
 
 ## Answer protection
 
-The contract stores a SHA-256 commitment for each master answer. The Quiz Master frontend retains the answer and salt locally so it can automatically trigger post-question evaluation.
+The contract stores a SHA-256 commitment for each master answer. The Quiz Master frontend retains the answer and salt locally so it can automatically trigger asynchronous evaluation.
 
 The current architecture therefore requires the Quiz Master automation page to remain available during the quiz for autonomous evaluation triggering. This is an orchestration requirement, not a GenLayer requirement.
 
