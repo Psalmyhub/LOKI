@@ -1,61 +1,45 @@
-"""Phase 3 semantic-evaluation contract rules.
-
-TEXT answers use a 60% correctness threshold.
-NUMERIC answers use a 90% correctness threshold.
-"""
+"""Unit-level invariants for the automatic Quizambig architecture."""
 
 
-def test_phase_3_thresholds():
-    thresholds = {"TEXT": 60, "NUMERIC": 90}
-    assert thresholds["TEXT"] == 60
-    assert thresholds["NUMERIC"] == 90
+def test_no_answer_criteria_is_part_of_the_model():
+    contract_source = open("contracts/quizambig.py", encoding="utf-8").read()
+    assert "question_criteria" not in contract_source
+    assert "criteria" not in contract_source.lower()
 
 
-def test_text_boundary():
-    threshold = 60
-    assert (59 >= threshold) is False
-    assert (60 >= threshold) is True
+def test_automatic_lifecycle_has_no_manual_question_controls():
+    contract_source = open("contracts/quizambig.py", encoding="utf-8").read()
+    for name in ("start_question", "close_question", "reveal_master_answer"):
+        assert f"def {name}" not in contract_source
 
 
-def test_numeric_boundary():
-    threshold = 90
-    assert (89 >= threshold) is False
-    assert (90 >= threshold) is True
+def test_evaluation_can_start_without_waiting_for_question_close():
+    contract_source = open("contracts/quizambig.py", encoding="utf-8").read()
+    assert 'in ("ACTIVE", "CLOSED")' in contract_source
 
 
-def test_text_validator_boundary_agreement():
-    threshold = 60
-    assert (59 >= threshold) != (63 >= threshold)
+def test_evaluation_records_a_semantic_score_and_correctness():
+    contract_source = open("contracts/quizambig.py", encoding="utf-8").read()
+    assert "semantic_score" in contract_source
+    assert "evaluation_correct" in contract_source
+    assert '"FINALIZED"' in contract_source
 
 
-def test_numeric_validator_boundary_agreement():
-    threshold = 90
-    assert (89 >= threshold) != (93 >= threshold)
+def test_evaluation_prompt_uses_equivalent_meaning():
+    contract_source = open("contracts/quizambig.py", encoding="utf-8").read()
+    assert "equivalent in meaning or principle" in contract_source
+    assert "Do not use speed" in contract_source
 
 
-def test_text_validator_tolerance():
-    assert abs(80 - 76) <= 5
-    assert abs(80 - 86) > 5
+def test_player_records_submission_speed_on_chain():
+    contract_source = open("contracts/quizambig.py", encoding="utf-8").read()
+    assert "submission_time" in contract_source
+    assert "submission_response_time" in contract_source
 
 
-def test_numeric_validator_tolerance():
-    assert abs(95 - 91) <= 5
-    assert abs(95 - 101) > 5
-
-
-def test_numeric_equivalent_forms_are_supported_by_semantic_evaluator():
-    # The GenLayer prompt must explicitly allow equivalent numeric forms,
-    # such as "4" and "four", while retaining the 90% threshold.
-    requirements = ("NUMERIC", "90% threshold", "4 and four")
-    assert all(isinstance(item, str) and item for item in requirements)
-
-
-def test_evaluation_requires_reveal():
-    # Contract rule: evaluation is unavailable until the committed answer
-    # has been verified and revealed.
-    required_message = "master answer must be revealed before evaluation"
-    assert required_message
-
-
-def test_evaluation_is_finalized_only_after_consensus():
-    assert "FINALIZED" == "FINALIZED"
+def test_frontend_keeps_master_secret_out_of_player_page():
+    master_source = open("app/master/page.tsx", encoding="utf-8").read()
+    player_source = open("app/quiz/[id]/page.tsx", encoding="utf-8").read()
+    assert "sessionStorage" in master_source
+    assert "masterAnswer" not in player_source
+    assert "secret.answer" not in player_source
