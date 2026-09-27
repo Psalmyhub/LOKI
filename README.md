@@ -59,7 +59,7 @@ If GenLayer has not finished judging an answer, the player appears as Judging…
 
 Master answers are committed with SHA-256 and are not exposed as plaintext during the active question.
 
-The current automation implementation retains the master answer and salt in the Quiz Master's browser session so the Quiz Master frontend can automatically trigger post-question GenLayer evaluations. This means the Quiz Master automation page needs to remain open during the quiz.
+The current automation implementation retains the master answer and salt in the Quiz Master's browser session so the Quiz Master frontend can automatically trigger asynchronous GenLayer evaluations. This means the Quiz Master automation page needs to remain open during the quiz.
 
 ## Current deployment note
 
