@@ -117,17 +117,9 @@ export default function HomePage() {
               <article className="card" key={q.id}>
                 <h3>{q.title || "Untitled quiz"}</h3>
 
-                <p className="muted">
-                  {q.description || "No description."}
-                </p>
-
                 <div className="meta">
                   <span className="badge">
                     {q.question_count} questions
-                  </span>
-
-                  <span className="badge">
-                    {q.overall_duration_seconds}s total
                   </span>
 
                   <span className="badge">{q.status}</span>
