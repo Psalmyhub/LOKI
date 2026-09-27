@@ -155,6 +155,18 @@ export default function MasterPage() {
 
   useEffect(() => {
     if (!quiz || quiz.status !== "ACTIVE" || !wallet) return;
+
+    const warnBeforeClose = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "Quizambig is running. Keep this browser tab open so pending GenLayer judgments can be submitted automatically.";
+    };
+
+    window.addEventListener("beforeunload", warnBeforeClose);
+    return () => window.removeEventListener("beforeunload", warnBeforeClose);
+  }, [quiz, wallet]);
+
+  useEffect(() => {
+    if (!quiz || quiz.status !== "ACTIVE" || !wallet) return;
     const run = async () => {
       try {
         const current = await getCurrentQuestion(quiz.id);
@@ -271,7 +283,20 @@ export default function MasterPage() {
           )}
 
           {quiz.status === "ACTIVE" && (
-            <section className="card">
+            <>
+              <div className="masterKeepOpen" role="status">
+                <div className="masterKeepOpenIcon">!</div>
+                <div>
+                  <strong>Keep this Quiz Master tab open</strong>
+                  <p>
+                    Quizambig uses this browser session to securely supply master answers to GenLayer
+                    and process pending judgments automatically. Do not close this tab until the quiz
+                    and pending judgments are finished.
+                  </p>
+                </div>
+              </div>
+
+              <section className="card">
               <h2>Quiz running automatically</h2>
               {activeQuestion ? (
                 <>
@@ -281,7 +306,8 @@ export default function MasterPage() {
                 </>
               ) : <p className="muted">Waiting for the blockchain schedule…</p>}
               <div className="actions"><Link className="secondary" href={`/quiz/${quiz.id}`}>Open player view</Link></div>
-            </section>
+              </section>
+            </>
           )}
         </>
       )}
