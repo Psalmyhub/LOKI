@@ -10,7 +10,6 @@ import {
   getPlayerCount,
   getPlayerStatus,
   getQuestion,
-  getQuestionId,
   getQuiz,
   joinQuiz,
   submitAnswer,
