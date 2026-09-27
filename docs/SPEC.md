@@ -1,120 +1,91 @@
-# Quizambig Phase 3 — GenLayer Semantic Evaluation
+# Quizambig — Automatic Quiz Lifecycle
 
-Phase 3 makes GenLayer the authoritative semantic-evaluation layer.
+Quizambig separates ordinary blockchain quiz operations from GenLayer semantic judgment.
 
-## Evaluation input
+## Quiz Master workflow
 
-GenLayer receives:
-- the protected master answer after verified reveal
-- the player's submitted answer
-- the Quiz Master's evaluation criteria
+The Quiz Master:
+1. enters the quiz title;
+2. prepares all questions before publishing;
+3. supplies one master answer for each question;
+4. chooses TEXT or NUMERIC mode;
+5. chooses a duration for each question;
+6. publishes the complete quiz once.
 
-The prompt explicitly treats those fields as untrusted quiz data so text inside
-an answer cannot become an instruction to the evaluator.
+There is no per-question publish, start, close, reveal, or evaluate button.
 
-## Output
+## Blockchain responsibility
 
-The non-deterministic evaluator returns:
+Normal deterministic contract logic owns:
+- quiz creation;
+- question storage;
+- per-question durations;
+- the single publish timestamp;
+- automatic question schedule;
+- player registration;
+- answer submissions;
+- submission timestamps and response times;
+- leaderboard facts.
 
-`semantic_score`: integer from 0 through 100
+The current question is derived from blockchain time and the stored cumulative durations. Q1 starts at publish time; Q2 starts after Q1 duration; Q3 starts after Q1 + Q2 durations; and so on.
 
-A short explanation is also requested for diagnostics, but the explanation is
-not part of the consensus decision.
+The frontend continuously reads the current question and automatically moves the player interface to the next question when the blockchain schedule changes. The contract rejects submissions for questions that are not currently active.
 
-## Equivalence Principle
+## GenLayer responsibility
 
-Quizambig uses a custom leader/validator pattern.
+GenLayer is used only for semantic answer judgment.
 
-The leader independently evaluates the answer.
+It receives:
+- the Quiz Master's master answer;
+- the player's answer;
+- the answer mode.
 
-Each validator independently evaluates the same answer.
+There is no Quiz Master evaluation-criteria field.
 
-Validators must:
-1. receive a valid 0–100 integer score;
-2. agree with the leader on which side of the answer-mode-specific correctness boundary the
-   answer belongs;
-3. differ from the leader by no more than 5 score points.
+The evaluator applies the Equivalence Principle: it judges whether the player's answer expresses the same essential meaning or principle as the master answer, rather than requiring identical wording.
 
-This prevents a tolerance window from converting a 59% answer into a 60% answer
-or vice versa.
+Equivalent wording, synonyms, grammar differences, different sentence structure, and equivalent numeric forms may be accepted. Contradictory, irrelevant, or materially different meaning should be rejected.
 
-GenLayer's current documentation recommends custom validator logic for
-non-deterministic LLM scoring and specifically describes absolute score
-tolerance as an appropriate pattern for LLM-generated scores. citeturn1search0turn1search1
+Speed is never used as a reason for semantic correctness.
 
-## Deterministic result
+TEXT answers use the 60% semantic-score boundary. NUMERIC answers use the 90% semantic-score boundary.
 
-Only after the Equivalence Principle accepts the result does deterministic
-contract code write:
+## Asynchronous judging
 
-- semantic score
-- correctness
-- evaluation status
+GenLayer evaluation is asynchronous from the quiz schedule.
 
-Correctness is then selected from the frozen answer mode:
+A question ending does not wait for GenLayer. The frontend can immediately move players to the next scheduled question while prior submissions remain pending.
 
-For TEXT answers:
+The Quiz Master frontend automatically triggers pending evaluations after a question closes using the locally retained master answer/salt needed to verify the commitment.
 
-`semantic_score >= 60 -> correct`
+Leaderboard rows therefore support a Judging… state. Once GenLayer finalizes a judgment, the leaderboard refreshes without interrupting the current question.
 
-`semantic_score < 60 -> wrong`
+## Leaderboard
 
-For NUMERIC answers:
+Leaderboard ordering is deterministic from recorded facts:
+1. correct answers are ranked ahead of incorrect answers;
+2. among players with the same correctness state, faster submission time ranks ahead.
 
-`semantic_score >= 90 -> correct`
+The contract records submission time and response time. GenLayer supplies only the semantic correctness judgment.
 
-`semantic_score < 90 -> wrong`
+Pending GenLayer judgments never block question progression.
 
-The frontend cannot override this result.
+## Answer protection
 
-## Important boundary
+The contract stores a SHA-256 commitment for each master answer. The Quiz Master frontend retains the answer and salt locally so it can automatically trigger post-question evaluation.
 
-The 60% text / 90% numeric thresholds is an application rule belonging to Quizambig. It is not a
-GenLayer protocol-wide threshold. The Equivalence Principle defines how
-validators accept the non-deterministic evaluation; Quizambig's deterministic
-code applies the 60% rule afterward. citeturn0search0turn0search1
+The current architecture therefore requires the Quiz Master automation page to remain available during the quiz for autonomous evaluation triggering. This is an orchestration requirement, not a GenLayer requirement.
 
-## Deterministic storage
+## Phase status
 
-No contract storage is mutated inside the non-deterministic leader/validator
-functions. Storage is updated only after the accepted result returns to the
-deterministic contract path, consistent with GenLayer's current execution
-rules. citeturn1search4
+Implemented in source:
+- automatic time-derived question progression;
+- one-time quiz publication;
+- per-question duration;
+- no answer-criteria field;
+- GenLayer-only semantic judgment;
+- asynchronous pending evaluation;
+- submission speed recording;
+- leaderboard data retrieval.
 
-## Phase 3 status
-
-Implemented:
-- evaluation state
-- semantic score storage
-- 60% correctness threshold
-- custom Equivalence Principle validator
-- score tolerance
-- correctness-boundary protection
-- deterministic result persistence
-- evaluation read methods
-
-Next:
-- execute the full GenLayer test suite
-- test validator disagreement and retries
-- define the final pending-evaluation lifecycle
-- connect semantic results to speed-aware scoring
-- build the per-quiz leaderboard
-
-
-## Answer mode and thresholds
-
-Each published question has an immutable answer mode:
-
-- `TEXT`: 60% semantic-score threshold.
-- `NUMERIC`: 90% semantic-score threshold.
-
-The mode is supplied when the question is created and is bound into the
-master-answer commitment. It cannot be changed after publication.
-
-For numeric questions, GenLayer is instructed to recognize equivalent numeric
-forms, including number words. For example, for `2 + 2`, a master answer of
-`4` can semantically match `four`. A numerically close but materially
-different value must meet the stricter 90% threshold.
-
-The 10-second frontend evaluation threshold remains a UX threshold only; it
-does not cancel or invalidate GenLayer evaluation.
+The new contract source must be deployed before the existing contract address can expose these new methods.
