@@ -356,7 +356,7 @@ class Quizambig(gl.Contract):
         submission_key = self._submission_key(question_id, player)
         quiz_id = u32(int(self.question_quiz_id[question_key]))
         assert self.submission_exists[submission_key], "submission does not exist"
-        assert self._question_status(quiz_id, self.question_index[question_key]) == "CLOSED", "question must be closed before evaluation"
+        assert self._question_status(quiz_id, self.question_index[question_key]) in ("ACTIVE", "CLOSED"), "question is not active or completed"
         assert self.evaluation_status[submission_key] == "PENDING", "submission has already been evaluated"
         expected = self.question_answer_commitment[question_key]
         actual = self._answer_commitment(master_answer, salt, self.question_answer_mode[question_key])
