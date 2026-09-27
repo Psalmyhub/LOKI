@@ -19,9 +19,7 @@ export type Quiz = {
   id: number;
   master: string;
   title: string;
-  description: string;
   question_count: number;
-  overall_duration_seconds: number;
   created_at: number;
   published_at: number;
   expires_at: number;
@@ -31,17 +29,15 @@ export type Quiz = {
 export type Question = {
   id: number;
   quiz_id: string;
+  index: number;
   question_text: string;
   answer_length: number;
   answer_mode: "TEXT" | "NUMERIC";
-  automatic_time: number;
-  custom_time: number;
-  has_custom_time: boolean;
+  duration: number;
   final_time: number;
   start_time: number;
   deadline: number;
   status: string;
-  answer_revealed: boolean;
 };
 
 export type Evaluation = {
@@ -50,6 +46,8 @@ export type Evaluation = {
   status: string;
   semantic_score: number;
   correct: boolean;
+  response_time_seconds: number;
+  submitted_at: number;
 };
 
 const readClient = () => createClient({ chain: studionet });
@@ -77,8 +75,8 @@ async function sha256Hex(value: string): Promise<string> {
     .join("");
 }
 
-export async function createQuiz(title: string, description: string, questionCount: number, overallDurationSeconds: number) {
-  return write("create_quiz", [title, description, questionCount, overallDurationSeconds]);
+export async function createQuiz(title: string, questionCount: number) {
+  return write("create_quiz", [title, questionCount]);
 }
 
 export async function addQuestion(
@@ -87,9 +85,7 @@ export async function addQuestion(
   masterAnswer: string,
   salt: string,
   answerMode: "TEXT" | "NUMERIC",
-  evaluationCriteria: string,
-  customTimeSeconds: number,
-  useCustomTime: boolean,
+  durationSeconds: number,
 ) {
   const commitment = await sha256Hex(`${masterAnswer}:${salt}:${answerMode}`);
   return write("add_question", [
@@ -98,9 +94,7 @@ export async function addQuestion(
     commitment,
     masterAnswer.length,
     answerMode,
-    evaluationCriteria,
-    customTimeSeconds,
-    useCustomTime,
+    durationSeconds,
   ]);
 }
 
@@ -117,23 +111,19 @@ export function generateSalt() {
 }
 
 export async function getNextQuestionId() {
-  return Number(
-    await readClient().readContract({
-      address: QUIZAMBIG_CONTRACT_ADDRESS,
-      functionName: "get_next_question_id",
-      args: [],
-    }),
-  );
+  return Number(await readClient().readContract({
+    address: QUIZAMBIG_CONTRACT_ADDRESS,
+    functionName: "get_next_question_id",
+    args: [],
+  }));
 }
 
 export async function getNextQuizId() {
-  return Number(
-    await readClient().readContract({
-      address: QUIZAMBIG_CONTRACT_ADDRESS,
-      functionName: "get_next_quiz_id",
-      args: [],
-    }),
-  );
+  return Number(await readClient().readContract({
+    address: QUIZAMBIG_CONTRACT_ADDRESS,
+    functionName: "get_next_quiz_id",
+    args: [],
+  }));
 }
 
 export async function getQuiz(id: number): Promise<Quiz> {
@@ -145,6 +135,15 @@ export async function getQuiz(id: number): Promise<Quiz> {
   })) as Quiz;
 }
 
+export async function getCurrentQuestion(id: number): Promise<Question> {
+  return (await readClient().readContract({
+    address: QUIZAMBIG_CONTRACT_ADDRESS,
+    functionName: "get_current_question",
+    args: [id],
+    jsonSafeReturn: true,
+  })) as Question;
+}
+
 export async function getQuestion(id: number): Promise<Question> {
   return (await readClient().readContract({
     address: QUIZAMBIG_CONTRACT_ADDRESS,
@@ -152,6 +151,14 @@ export async function getQuestion(id: number): Promise<Question> {
     args: [id],
     jsonSafeReturn: true,
   })) as Question;
+}
+
+export async function getQuestionId(quizId: number, index: number) {
+  return Number(await readClient().readContract({
+    address: QUIZAMBIG_CONTRACT_ADDRESS,
+    functionName: "get_question_id",
+    args: [quizId, index],
+  }));
 }
 
 export async function getPlayerStatus(id: number, player: `0x${string}`) {
@@ -163,6 +170,22 @@ export async function getPlayerStatus(id: number, player: `0x${string}`) {
   })) as { joined: boolean; quiz_id: number; player: string };
 }
 
+export async function getPlayerCount(id: number) {
+  return Number(await readClient().readContract({
+    address: QUIZAMBIG_CONTRACT_ADDRESS,
+    functionName: "get_player_count",
+    args: [id],
+  }));
+}
+
+export async function getPlayer(id: number, index: number) {
+  return String(await readClient().readContract({
+    address: QUIZAMBIG_CONTRACT_ADDRESS,
+    functionName: "get_player",
+    args: [id, index],
+  }));
+}
+
 export async function getEvaluation(questionId: number, player: `0x${string}`) {
   return (await readClient().readContract({
     address: QUIZAMBIG_CONTRACT_ADDRESS,
@@ -170,6 +193,15 @@ export async function getEvaluation(questionId: number, player: `0x${string}`) {
     args: [questionId, player],
     jsonSafeReturn: true,
   })) as Evaluation;
+}
+
+export async function evaluateSubmission(
+  questionId: number,
+  player: `0x${string}`,
+  masterAnswer: string,
+  salt: string,
+) {
+  return write("evaluate_submission", [questionId, player, masterAnswer, salt]);
 }
 
 async function write(functionName: string, args: any[]) {
@@ -191,18 +223,9 @@ async function write(functionName: string, args: any[]) {
       `GenLayer transaction was accepted but contract execution did not succeed: ${receipt.txExecutionResultName ?? "unknown"}`,
     );
   }
-
   return hash;
 }
 
 export const joinQuiz = (id: number) => write("join_quiz", [id]);
 export const submitAnswer = (questionId: number, answer: string) =>
   write("submit_answer", [questionId, answer]);
-export const startQuestion = (questionId: number) =>
-  write("start_question", [questionId]);
-export const closeQuestion = (questionId: number) =>
-  write("close_question", [questionId]);
-export const revealMasterAnswer = (questionId: number, answer: string, salt: string) =>
-  write("reveal_master_answer", [questionId, answer, salt]);
-export const evaluateSubmission = (questionId: number, player: `0x${string}`) =>
-  write("evaluate_submission", [questionId, player]);
