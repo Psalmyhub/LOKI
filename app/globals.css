@@ -38,3 +38,28 @@ h2 { letter-spacing:-.03em; }
 .score { font-size:48px; font-weight:850; letter-spacing:-.05em; }
 .small { font-size:12px; color:#777c89; }
 .center { text-align:center; padding:80px 0; }
+
+select { width:100%; border:1px solid #d8dbe5; border-radius:12px; padding:12px 13px; background:white; outline:none; }
+.sectionHeading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.stepLabel { color:#5c62d6; font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
+.sectionHeading h2 { margin:4px 0 0; }
+.draftList { display:grid; gap:16px; }
+.draftCard { position:relative; }
+.draftHeader { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:8px; }
+.draftHeader h3 { margin:4px 0 0; font-size:20px; }
+.formRow { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.iconButton { width:36px; height:36px; border:1px solid #d8dbe5; background:white; border-radius:10px; font-size:22px; line-height:1; }
+.addButton { width:100%; margin-top:16px; border:1px dashed #b9bdd0; background:white; border-radius:14px; padding:15px; font-weight:800; color:#3f4352; }
+.plusIcon { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:#171923; color:white; margin-right:8px; }
+.readyRow { display:flex; align-items:center; gap:8px; padding-top:4px; color:#626778; font-size:13px; }
+.readyDot { width:8px; height:8px; border-radius:50%; background:#5c62d6; }
+.publishPanel { margin-top:24px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.publishPanel h3 { margin:4px 0; }
+.quizHeader { max-width:900px; margin:0 auto 40px; padding:32px; background:white; border:1px solid #e2e4eb; border-radius:24px; box-shadow:0 8px 30px rgba(20,24,40,.04); }
+.quizHeader h1 { margin-bottom:12px; }
+@media (max-width:700px) {
+  .formRow { grid-template-columns:1fr; gap:0; }
+  .publishPanel { align-items:stretch; flex-direction:column; }
+  .sectionHeading { flex-direction:column; }
+  .quizHeader { padding:24px; }
+}
