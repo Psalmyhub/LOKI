@@ -63,3 +63,30 @@ select { width:100%; border:1px solid #d8dbe5; border-radius:12px; padding:12px 
   .sectionHeading { flex-direction:column; }
   .quizHeader { padding:24px; }
 }
+
+
+.masterKeepOpen {
+  display:flex;
+  align-items:flex-start;
+  gap:14px;
+  margin:0 0 18px;
+  padding:16px 18px;
+  border:1px solid #f0c36a;
+  background:#fff8e7;
+  color:#5f4300;
+  border-radius:16px;
+}
+.masterKeepOpenIcon {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex:0 0 28px;
+  width:28px;
+  height:28px;
+  border-radius:50%;
+  background:#f0b429;
+  color:white;
+  font-weight:900;
+}
+.masterKeepOpen strong { display:block; margin-bottom:4px; }
+.masterKeepOpen p { margin:0; line-height:1.55; font-size:14px; }
