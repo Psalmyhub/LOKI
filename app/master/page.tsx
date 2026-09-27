@@ -126,7 +126,7 @@ export default function MasterPage() {
     const playerCount = await getPlayerCount(quiz.id);
     for (let index = 0; index < quiz.question_count; index++) {
       const q = await getQuestion(await getQuestionId(quiz.id, index));
-      if (q.status !== "CLOSED") continue;
+      if (q.status !== "ACTIVE" && q.status !== "CLOSED") continue;
       const secret = secrets[String(index)];
       if (!secret) continue;
 
@@ -155,17 +155,21 @@ export default function MasterPage() {
 
   useEffect(() => {
     if (!quiz || quiz.status !== "ACTIVE" || !wallet) return;
-    const timer = window.setInterval(() => {
-      void (async () => {
-        try {
-          const current = await getCurrentQuestion(quiz.id);
-          setActiveQuestion(current);
-          await automateEvaluations();
-        } catch {
-          // The quiz can be between scheduled questions or already completed.
-        }
-      })();
-    }, 3000);
+    const run = async () => {
+      try {
+        const current = await getCurrentQuestion(quiz.id);
+        setActiveQuestion(current);
+      } catch {
+        // The quiz can be between scheduled questions or already completed.
+      }
+      try {
+        await automateEvaluations();
+      } catch {
+        // A slow or temporarily unavailable GenLayer evaluation must never stop the quiz schedule.
+      }
+    };
+    void run();
+    const timer = window.setInterval(() => { void run(); }, 3000);
     return () => window.clearInterval(timer);
   }, [quiz, wallet]);
 
@@ -273,7 +277,7 @@ export default function MasterPage() {
                 <>
                   <div className="meta"><span className="badge">Question {activeQuestion.index + 1}</span><span className="badge">{activeQuestion.duration}s</span><span className="badge">{activeQuestion.status}</span></div>
                   <div className="question">{activeQuestion.question_text}</div>
-                  <p className="muted">No start, close, reveal, or evaluation button is required. This page automatically triggers pending GenLayer judgments after each question closes.</p>
+                  <p className="muted">No start, close, reveal, or evaluation button is required. This page automatically triggers pending GenLayer judgments as soon as submissions exist.</p>
                 </>
               ) : <p className="muted">Waiting for the blockchain schedule…</p>}
               <div className="actions"><Link className="secondary" href={`/quiz/${quiz.id}`}>Open player view</Link></div>
