@@ -2,40 +2,73 @@
 
 Quizambig is a free semantic quiz platform built on GenLayer.
 
-## Core idea
+## Core architecture
 
-Quiz Masters publish quizzes containing questions, protected master answers, evaluation criteria, and timing. Players answer naturally in their own words. GenLayer evaluates semantic equivalence and produces an authoritative semantic score.
+Quizambig deliberately separates ordinary quiz operations from AI judgment.
 
-### Locked product rules
+### Frontend + blockchain
 
-- Quiz title and description are optional.
-- Quiz Master chooses the overall quiz duration in seconds.
-- Each question gets an automatic duration derived from master-answer length.
-- Quiz Master may override the automatically derived question duration in seconds.
-- Question timing is frozen when the quiz is published.
-- Quiz Master cannot assign per-question points.
-- Semantic score below 60% is wrong; 60% or above is correct.
-- Speed contributes to the system-generated score without replacing correctness.
-- Master answers are not publicly revealed while a question is active.
-- GenLayer is authoritative for semantic evaluation.
-- The frontend displays authoritative contract results; it does not decide correctness or score.
-- A 10-second frontend waiting threshold controls UX only. It does not cancel GenLayer evaluation.
-- If evaluation takes longer than 10 seconds, the player continues to the next question while the evaluation remains pending and later updates the leaderboard.
+The frontend orchestrates normal blockchain transactions for:
+- creating a quiz;
+- preparing all questions;
+- storing one master-answer commitment per question;
+- storing a duration for every question;
+- publishing the complete quiz once;
+- automatically following the blockchain question schedule;
+- recording player submissions and submission speed;
+- refreshing leaderboard data.
 
-## Initial milestone
+The Quiz Master does not manually publish, start, close, reveal, or evaluate individual questions.
 
-Create Quiz -> Add Questions -> Freeze -> Submit Answer -> Close Question -> Reveal Answer -> GenLayer Semantic Evaluation -> 60% Result.
+### GenLayer
 
-The exact production scoring formula and automatic timing formula will be finalized before production release.
+GenLayer is used only to judge answers.
 
-## Architecture
+It receives the master answer and the player's answer and applies an Equivalence Principle: the answer is judged by equivalent meaning or principle, not by exact wording.
 
-- contracts/ — GenLayer Intelligent Contracts
-- tests/ — contract behavior tests
-- docs/ — product and technical specifications
+There is no frontend answer-criteria field.
 
-## GenLayer
+GenLayer correctness is separate from speed. Submission time is recorded by the blockchain; GenLayer does not decide speed or leaderboard ordering.
 
-Quizambig uses GenLayer's Equivalence Principle for non-deterministic semantic evaluation. Consensus accepts a proposed result only when validators accept it under the contract-defined equivalence rule.
+## Automatic question schedule
 
-See the current GenLayer documentation at https://docs.genlayer.com/.
+Publishing records one blockchain start timestamp.
+
+Each question has its own immutable duration. The contract derives the active question from blockchain time:
+
+Q1 → duration 1  
+Q2 → duration 2  
+Q3 → duration 3  
+…  
+
+The frontend automatically changes to the next question when its scheduled time arrives.
+
+A slow GenLayer judgment never blocks the quiz. A submission can remain pending while players continue to the next question.
+
+## Leaderboard
+
+After each question, the frontend displays the leaderboard.
+
+Ordering is based on deterministic facts:
+1. correct answers first;
+2. faster submission time breaks ties.
+
+If GenLayer has not finished judging an answer, the player appears as Judging… and the leaderboard refreshes when the authoritative judgment arrives.
+
+## Answer protection
+
+Master answers are committed with SHA-256 and are not exposed as plaintext during the active question.
+
+The current automation implementation retains the master answer and salt in the Quiz Master's browser session so the Quiz Master frontend can automatically trigger post-question GenLayer evaluations. This means the Quiz Master automation page needs to remain open during the quiz.
+
+## Current deployment note
+
+The source contract now contains the automatic lifecycle and new evaluation interface. The existing deployed contract address must be replaced with a deployment of this updated contract before the new frontend can operate against it.
+
+## Project layout
+
+- contracts/ — GenLayer Intelligent Contract
+- app/ — Next.js frontend
+- lib/ — blockchain client helpers
+- tests/ — contract tests
+- docs/ — technical specification
