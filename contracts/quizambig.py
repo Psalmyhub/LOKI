@@ -103,6 +103,8 @@ class Quizambig(gl.Contract):
         return total
 
     def _current_question_index(self, quiz_id: u32) -> u32:
+        if self.quiz_published_at[self._quiz_key(quiz_id)] == 0:
+            return self.quiz_question_count[self._quiz_key(quiz_id)]
         now = self._now()
         for index in range(0, self.quiz_question_count[self._quiz_key(quiz_id)]):
             if now >= self._question_start(quiz_id, index) and now < self._question_deadline(quiz_id, index):
