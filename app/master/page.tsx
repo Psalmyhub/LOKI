@@ -1,21 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   addQuestion,
-  closeQuestion,
   connectWallet,
   createQuiz,
   evaluateSubmission,
   generateSalt,
-  getNextQuestionId,
+  getCurrentQuestion,
+  getEvaluation,
   getNextQuizId,
+  getPlayer,
+  getPlayerCount,
   getQuestion,
   getQuiz,
   publishQuiz,
-  revealMasterAnswer,
-  startQuestion,
   type Question,
   type Quiz,
 } from "../../lib/quizambig";
@@ -24,15 +24,15 @@ type DraftQuestion = {
   text: string;
   answer: string;
   mode: "TEXT" | "NUMERIC";
-  criteria: string;
   duration: string;
 };
+
+type Secret = { answer: string; salt: string };
 
 const blankQuestion = (): DraftQuestion => ({
   text: "",
   answer: "",
   mode: "TEXT",
-  criteria: "",
   duration: "60",
 });
 
@@ -41,14 +41,12 @@ export default function MasterPage() {
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [title, setTitle] = useState("");
   const [drafts, setDrafts] = useState<DraftQuestion[]>([blankQuestion()]);
-  const [q, setQ] = useState<DraftQuestion>(blankQuestion());
   const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
-  const [masterAnswer, setMasterAnswer] = useState("");
-  const [masterSalt, setMasterSalt] = useState("");
-  const [player, setPlayer] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const secretsRef = useRef<Record<string, Secret>>({});
+  const evaluatedRef = useRef<Set<string>>(new Set());
 
   async function connect() {
     try {
@@ -59,146 +57,119 @@ export default function MasterPage() {
   }
 
   function updateDraft(index: number, patch: Partial<DraftQuestion>) {
-    setDrafts((current) =>
-      current.map((draft, i) => (i === index ? { ...draft, ...patch } : draft)),
-    );
+    setDrafts(current => current.map((d, i) => i === index ? { ...d, ...patch } : d));
   }
 
   function addDraftQuestion() {
-    setDrafts((current) => [...current, blankQuestion()]);
-    setMessage("New question added to the quiz plan.");
-    setError("");
+    setDrafts(current => [...current, blankQuestion()]);
   }
 
   function removeDraftQuestion(index: number) {
     if (drafts.length === 1) return;
-    setDrafts((current) => current.filter((_, i) => i !== index));
+    setDrafts(current => current.filter((_, i) => i !== index));
   }
 
   async function create() {
-    setBusy(true);
-    setError("");
-    setMessage("");
-
+    setBusy(true); setError(""); setMessage("");
     try {
       if (!title.trim()) throw new Error("Quiz title is required.");
-      if (drafts.length < 1) throw new Error("Add at least one question.");
-
       for (let i = 0; i < drafts.length; i++) {
-        const draft = drafts[i];
-        if (!draft.text.trim()) throw new Error(`Question ${i + 1} is missing its question text.`);
-        if (!draft.answer.trim()) throw new Error(`Question ${i + 1} is missing its master answer.`);
-        if (!draft.criteria.trim()) throw new Error(`Question ${i + 1} is missing evaluation criteria.`);
-        const seconds = Number(draft.duration);
-        if (!Number.isInteger(seconds) || seconds < 1) {
-          throw new Error(`Question ${i + 1} must have a duration of at least 1 second.`);
-        }
+        const d = drafts[i];
+        const seconds = Number(d.duration);
+        if (!d.text.trim()) throw new Error(`Question ${i + 1} is missing its question text.`);
+        if (!d.answer.trim()) throw new Error(`Question ${i + 1} is missing its master answer.`);
+        if (!Number.isInteger(seconds) || seconds < 1) throw new Error(`Question ${i + 1} needs a duration of at least 1 second.`);
       }
 
       const id = await getNextQuizId();
+      await createQuiz(title.trim(), drafts.length);
 
-      // The current deployed contract still requires a quiz-level duration.
-      // Use the sum of prepared question durations only as compatibility data;
-      // the UI treats duration as belonging to each question.
-      const compatibilityDuration = drafts.reduce(
-        (total, draft) => total + Number(draft.duration),
-        0,
-      );
-
-      await createQuiz(title.trim(), "", drafts.length, compatibilityDuration);
-
-      for (const draft of drafts) {
+      const secrets: Record<string, Secret> = {};
+      for (let i = 0; i < drafts.length; i++) {
+        const d = drafts[i];
         const salt = generateSalt();
-        await addQuestion(
-          id,
-          draft.text.trim(),
-          draft.answer.trim(),
-          salt,
-          draft.mode,
-          draft.criteria.trim(),
-          Number(draft.duration),
-          true,
-        );
+        await addQuestion(id, d.text.trim(), d.answer.trim(), salt, d.mode, Number(d.duration));
+        secrets[String(i)] = { answer: d.answer.trim(), salt };
       }
 
+      secretsRef.current = secrets;
+      sessionStorage.setItem(`quizambig:secrets:${id}`, JSON.stringify(secrets));
       setQuiz(await getQuiz(id));
-      setMessage(
-        `Quiz #${id} prepared on-chain with ${drafts.length} question${drafts.length === 1 ? "" : "s"}. Review it before publishing.`,
-      );
+      setMessage(`Quiz #${id} prepared. Publish once when every question is ready.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function loadActiveQuestion() {
-    if (!quiz) return;
-    setBusy(true);
-    setError("");
-    try {
-      const next = await getNextQuestionId();
-      for (let id = 1; id < next; id++) {
-        try {
-          const candidate = await getQuestion(id);
-          if (Number(candidate.quiz_id) === quiz.id) {
-            setActiveQuestion(candidate);
-            return;
-          }
-        } catch {}
-      }
-      throw new Error("No question found for this quiz.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function masterAction(action: "start" | "close" | "reveal" | "evaluate") {
-    if (!activeQuestion) return;
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      if (action === "start") await startQuestion(activeQuestion.id);
-      if (action === "close") await closeQuestion(activeQuestion.id);
-      if (action === "reveal") {
-        if (!masterAnswer.trim() || !masterSalt.trim()) {
-          throw new Error("Master answer and original salt are required for verified reveal.");
-        }
-        await revealMasterAnswer(activeQuestion.id, masterAnswer, masterSalt);
-      }
-      if (action === "evaluate") {
-        if (!player.trim()) throw new Error("Enter the player's wallet address.");
-        await evaluateSubmission(activeQuestion.id, player.trim() as `0x${string}`);
-      }
-      await loadActiveQuestion();
-      setMessage("Transaction confirmed by GenLayer.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
 
   async function publish() {
     if (!quiz) return;
-    setBusy(true);
-    setError("");
-    setMessage("");
+    setBusy(true); setError(""); setMessage("");
     try {
       await publishQuiz(quiz.id);
-      setQuiz({ ...quiz, status: "PUBLISHED" });
-      setMessage(
-        "Quiz published on-chain. The current contract publishes all prepared questions together; sequential question publishing will follow the contract upgrade.",
-      );
+      setQuiz(await getQuiz(quiz.id));
+      setMessage("Published once. Question timing and progression are now automatic.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
+    } finally { setBusy(false); }
+  }
+
+  async function automateEvaluations() {
+    if (!quiz || !wallet || wallet.toLowerCase() !== quiz.master.toLowerCase()) return;
+    let secrets = secretsRef.current;
+    if (Object.keys(secrets).length === 0) {
+      const raw = sessionStorage.getItem(`quizambig:secrets:${quiz.id}`);
+      if (raw) secrets = JSON.parse(raw) as Record<string, Secret>;
+      secretsRef.current = secrets;
+    }
+
+    const playerCount = await getPlayerCount(quiz.id);
+    for (let index = 0; index < quiz.question_count; index++) {
+      const q = await getQuestion(await (async () => {
+        const { getQuestionId } = await import("../../lib/quizambig");
+        return getQuestionId(quiz.id, index);
+      })());
+      if (q.status !== "CLOSED") continue;
+      const secret = secrets[String(index)];
+      if (!secret) continue;
+
+      for (let p = 0; p < playerCount; p++) {
+        const player = (await getPlayer(quiz.id, p)) as `0x${string}`;
+        const key = `${q.id}:${player.toLowerCase()}`;
+        if (evaluatedRef.current.has(key)) continue;
+        try {
+          const existing = await getEvaluation(q.id, player);
+          if (existing.status === "FINALIZED") {
+            evaluatedRef.current.add(key);
+            continue;
+          }
+        } catch {
+          continue;
+        }
+        evaluatedRef.current.add(key);
+        try {
+          await evaluateSubmission(q.id, player, secret.answer, secret.salt);
+        } catch {
+          evaluatedRef.current.delete(key);
+        }
+      }
     }
   }
+
+  useEffect(() => {
+    if (!quiz || quiz.status !== "ACTIVE" || !wallet) return;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const current = await getCurrentQuestion(quiz.id);
+          setActiveQuestion(current);
+          await automateEvaluations();
+        } catch {
+          // The quiz can be between scheduled questions or already completed.
+        }
+      })();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [quiz, wallet]);
 
   return (
     <main className="shell">
@@ -217,35 +188,20 @@ export default function MasterPage() {
         <>
           <section className="hero">
             <div className="eyebrow">Quiz Master</div>
-            <h1>Prepare your quiz.</h1>
-            <p>Build every question and its timing first. Nothing is published until you are ready.</p>
+            <h1>Prepare the whole quiz once.</h1>
+            <p>Add every question, its answer, and its duration. Then publish once. The blockchain schedule takes over automatically.</p>
           </section>
 
           <section className="card">
-            <div className="sectionHeading">
-              <div>
-                <div className="stepLabel">Quiz setup</div>
-                <h2>{title || "Untitled quiz"}</h2>
-              </div>
-              <span className="badge">Draft</span>
-            </div>
-
             <div className="field">
               <label>Quiz title</label>
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. General Knowledge"
-              />
+              <input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. General Knowledge" />
             </div>
           </section>
 
           <section className="section">
             <div className="sectionHeading">
-              <div>
-                <div className="stepLabel">Questions</div>
-                <h2>Prepare every question</h2>
-              </div>
+              <div><div className="stepLabel">Questions</div><h2>Prepare every question</h2></div>
               <span className="badge">{drafts.length} prepared</span>
             </div>
 
@@ -253,106 +209,46 @@ export default function MasterPage() {
               {drafts.map((draft, index) => (
                 <article className="card draftCard" key={index}>
                   <div className="draftHeader">
-                    <div>
-                      <span className="eyebrow">Question {index + 1}</span>
-                      <h3>{draft.text || "New question"}</h3>
-                    </div>
-                    {drafts.length > 1 && (
-                      <button
-                        className="iconButton"
-                        type="button"
-                        onClick={() => removeDraftQuestion(index)}
-                        aria-label={`Remove question ${index + 1}`}
-                        title="Remove question"
-                      >
-                        ×
-                      </button>
-                    )}
+                    <div><span className="eyebrow">Question {index + 1}</span><h3>{draft.text || "New question"}</h3></div>
+                    {drafts.length > 1 && <button className="iconButton" type="button" onClick={() => removeDraftQuestion(index)}>×</button>}
                   </div>
 
                   <div className="field">
                     <label>Question</label>
-                    <textarea
-                      value={draft.text}
-                      onChange={(e) => updateDraft(index, { text: e.target.value })}
-                      placeholder="Write the question players will answer."
-                    />
+                    <textarea value={draft.text} onChange={e => updateDraft(index, { text: e.target.value })} placeholder="Write the question players will answer." />
                   </div>
 
                   <div className="field">
                     <label>Master answer</label>
-                    <input
-                      value={draft.answer}
-                      onChange={(e) => updateDraft(index, { answer: e.target.value })}
-                      placeholder="Authoritative answer"
-                    />
-                    <span className="small">
-                      This is the answer committed for authoritative semantic evaluation.
-                    </span>
+                    <input value={draft.answer} onChange={e => updateDraft(index, { answer: e.target.value })} placeholder="Authoritative answer" />
                   </div>
 
                   <div className="formRow">
                     <div className="field">
                       <label>Answer mode</label>
-                      <select
-                        value={draft.mode}
-                        onChange={(e) =>
-                          updateDraft(index, { mode: e.target.value as "TEXT" | "NUMERIC" })
-                        }
-                      >
+                      <select value={draft.mode} onChange={e => updateDraft(index, { mode: e.target.value as "TEXT" | "NUMERIC" })}>
                         <option value="TEXT">TEXT</option>
                         <option value="NUMERIC">NUMERIC</option>
                       </select>
                     </div>
-
                     <div className="field">
-                      <label>Duration for this question (seconds)</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={draft.duration}
-                        onChange={(e) => updateDraft(index, { duration: e.target.value })}
-                      />
+                      <label>Duration (seconds)</label>
+                      <input type="number" min="1" value={draft.duration} onChange={e => updateDraft(index, { duration: e.target.value })} />
                     </div>
-                  </div>
-
-                  <div className="field">
-                    <label>Evaluation criteria</label>
-                    <textarea
-                      value={draft.criteria}
-                      onChange={(e) => updateDraft(index, { criteria: e.target.value })}
-                      placeholder="What meaning must a correct answer express?"
-                    />
-                  </div>
-
-                  <div className="readyRow">
-                    <span className="readyDot" />
-                    <span>
-                      {draft.text.trim() && draft.answer.trim() && draft.criteria.trim()
-                        ? `Question ${index + 1} is ready`
-                        : `Complete Question ${index + 1} before publishing`}
-                    </span>
                   </div>
                 </article>
               ))}
             </div>
 
-            <button className="addButton" type="button" onClick={addDraftQuestion}>
-              <span className="plusIcon">+</span>
-              Add another question
-            </button>
+            <button className="addButton" type="button" onClick={addDraftQuestion}><span className="plusIcon">+</span>Add another question</button>
 
             <div className="publishPanel card">
               <div>
-                <div className="stepLabel">Ready to publish?</div>
-                <h3>{drafts.length} question{drafts.length === 1 ? "" : "s"} prepared</h3>
-                <p className="muted">
-                  Review all questions before sending the quiz configuration on-chain.
-                </p>
+                <div className="stepLabel">Final step</div>
+                <h3>{drafts.length} questions ready</h3>
+                <p className="muted">Create the complete quiz on-chain, then publish it once.</p>
               </div>
-              <button className="primary" disabled={busy} onClick={create}>
-                {busy ? "Preparing on-chain…" : "Create quiz on-chain"}
-              </button>
+              <button className="primary" disabled={busy} onClick={create}>{busy ? "Preparing…" : "Create quiz on-chain"}</button>
             </div>
           </section>
         </>
@@ -360,106 +256,29 @@ export default function MasterPage() {
         <>
           <section className="quizHeader">
             <div className="eyebrow">Quiz Master · Quiz #{quiz.id}</div>
-            <h1>{quiz.title || "Untitled quiz"}</h1>
-            <div className="meta">
-              <span className="badge">{quiz.question_count} questions</span>
-              <span className="badge">{quiz.status}</span>
-            </div>
+            <h1>{quiz.title}</h1>
+            <div className="meta"><span className="badge">{quiz.question_count} questions</span><span className="badge">{quiz.status}</span></div>
           </section>
 
           {quiz.status === "DRAFT" && (
-            <section className="section card">
-              <div className="sectionHeading">
-                <div>
-                  <div className="stepLabel">Preparation complete</div>
-                  <h2>Review before publishing</h2>
-                </div>
-                <span className="badge">Ready</span>
-              </div>
-              <p className="muted">
-                All prepared questions are now stored on-chain. Publishing is a normal
-                contract state change and does not require semantic evaluation.
-              </p>
-              <button className="primary" disabled={busy} onClick={publish}>
-                {busy ? "Publishing…" : "Publish quiz"}
-              </button>
+            <section className="card">
+              <h2>Ready to publish</h2>
+              <p className="muted">Publishing starts the blockchain clock. All questions are already committed and will become active according to their stored durations.</p>
+              <button className="primary" disabled={busy} onClick={publish}>{busy ? "Publishing…" : "Publish quiz once"}</button>
             </section>
           )}
 
-          {quiz.status === "PUBLISHED" && (
-            <section className="section card">
-              <h2>Question control</h2>
-              <p className="muted">
-                Load the current question to manage its lifecycle. Question timing is
-                configured per question.
-              </p>
-              <button className="secondary" disabled={busy} onClick={loadActiveQuestion}>
-                {busy ? "Loading…" : "Load question"}
-              </button>
-
-              {activeQuestion && (
-                <div className="section">
-                  <div className="meta">
-                    <span className="badge">Question #{activeQuestion.id}</span>
-                    <span className="badge">{activeQuestion.status}</span>
-                    <span className="badge">{activeQuestion.final_time}s</span>
-                    {activeQuestion.answer_revealed && <span className="badge">Answer revealed</span>}
-                  </div>
+          {quiz.status === "ACTIVE" && (
+            <section className="card">
+              <h2>Quiz running automatically</h2>
+              {activeQuestion ? (
+                <>
+                  <div className="meta"><span className="badge">Question {activeQuestion.index + 1}</span><span className="badge">{activeQuestion.duration}s</span><span className="badge">{activeQuestion.status}</span></div>
                   <div className="question">{activeQuestion.question_text}</div>
-
-                  {activeQuestion.status === "PUBLISHED" && (
-                    <button className="primary" disabled={busy} onClick={() => void masterAction("start")}>
-                      Start question
-                    </button>
-                  )}
-
-                  {activeQuestion.status === "ACTIVE" && (
-                    <button className="primary" disabled={busy} onClick={() => void masterAction("close")}>
-                      Close question
-                    </button>
-                  )}
-
-                  {activeQuestion.status === "CLOSED" && !activeQuestion.answer_revealed && (
-                    <>
-                      <div className="field">
-                        <label>Master answer</label>
-                        <input value={masterAnswer} onChange={(e) => setMasterAnswer(e.target.value)} />
-                      </div>
-                      <div className="field">
-                        <label>Original salt</label>
-                        <input value={masterSalt} onChange={(e) => setMasterSalt(e.target.value)} />
-                      </div>
-                      <button className="primary" disabled={busy} onClick={() => void masterAction("reveal")}>
-                        Verify & reveal answer
-                      </button>
-                    </>
-                  )}
-
-                  {activeQuestion.answer_revealed && (
-                    <>
-                      <div className="field">
-                        <label>Player wallet to evaluate</label>
-                        <input
-                          value={player}
-                          onChange={(e) => setPlayer(e.target.value)}
-                          placeholder="0x…"
-                        />
-                      </div>
-                      <button
-                        className="primary"
-                        disabled={busy || !player.trim()}
-                        onClick={() => void masterAction("evaluate")}
-                      >
-                        Run GenLayer evaluation
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-
-              <div className="actions">
-                <Link className="secondary" href={"/quiz/" + quiz.id}>Open player view</Link>
-              </div>
+                  <p className="muted">No start, close, reveal, or evaluation button is required. This page automatically triggers pending GenLayer judgments after each question closes.</p>
+                </>
+              ) : <p className="muted">Waiting for the blockchain schedule…</p>}
+              <div className="actions"><Link className="secondary" href={`/quiz/${quiz.id}`}>Open player view</Link></div>
             </section>
           )}
         </>
