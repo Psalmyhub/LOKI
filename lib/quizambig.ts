@@ -65,7 +65,6 @@ async function write(functionName:string,args:any[]){
   const receipt=await client.waitForTransactionReceipt({
     hash,
     status: TransactionStatus.FINALIZED,
-    fullTransaction: false,
   });
   if (receipt.txExecutionResultName !== ExecutionResult.FINISHED_WITH_RETURN) {
     throw new Error(
