@@ -1,13 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   connectWallet,
-  getNextQuizId,
-  getQuiz,
   QUIZAMBIG_CONTRACT_ADDRESS,
-  type Quiz,
 } from "../lib/quizambig";
 
 export default function HomePage() {
@@ -50,9 +47,6 @@ export default function HomePage() {
     }
   }
 
-  const published = quizzes.filter(
-    (q) => q.status === "PUBLISHED" || q.status === "ACTIVE",
-  );
 
   return (
     <main className="shell">
@@ -107,38 +101,8 @@ export default function HomePage() {
       {error && <div className="error">{error}</div>}
 
       <section className="section">
-        <h2>Published quizzes</h2>
-
-        {loading ? (
-          <p className="muted">Reading Studionet…</p>
-        ) : (
-          <div className="grid">
-            {published.map((q) => (
-              <article className="card" key={q.id}>
-                <h3>{q.title || "Untitled quiz"}</h3>
-
-                <div className="meta">
-                  <span className="badge">
-                    {q.question_count} questions
-                  </span>
-
-                  <span className="badge">{q.status}</span>
-                </div>
-
-                <Link className="primary" href={"/quiz/" + q.id}>
-                  Open quiz
-                </Link>
-              </article>
-            ))}
-          </div>
-        )}
-
-        {!loading && !published.length && (
-          <p className="muted">
-            No published quizzes are available yet.
-          </p>
-        )}
-      </section>
+        <div className="card"><h2>Private quizzes</h2><p className="muted">Quizambig does not publish a public quiz directory. A Quiz Master shares a private access link with the intended audience.</p></div>
+      </section>>
     </main>
   );
 }
