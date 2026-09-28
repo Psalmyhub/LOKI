@@ -1,4 +1,5 @@
 import { createClient } from "genlayer-js";
+import { TransactionStatus, ExecutionResult } from "genlayer-js/types";
 import { studionet } from "genlayer-js/chains";
 
 export const QUIZAMBIG_CONTRACT_ADDRESS = "0x8B40151A03c27C5B0De2f8DB01c17a5cd36FB658" as const;
@@ -61,9 +62,16 @@ export async function evaluateSubmission(questionId:number,player:`0x${string}`,
 async function write(functionName:string,args:any[]){
   const account=await walletAddress(); const client=writeClient(account);
   const hash=await client.writeContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName,args,value:0n});
-  const receipt=await client.waitForDecision({hash,interval:3000,retries:100});
-  if (receipt.statusName !== "ACCEPTED" && receipt.statusName !== "FINALIZED") throw new Error(`GenLayer transaction failed: ${receipt.statusName ?? "unknown status"} / ${receipt.txExecutionResultName ?? "unknown execution result"}`);
-  if (receipt.txExecutionResultName !== "FINISHED_WITH_RETURN") throw new Error(`GenLayer contract execution failed: ${receipt.statusName ?? "unknown status"} / ${receipt.txExecutionResultName ?? "unknown execution result"}`);
+  const receipt=await client.waitForTransactionReceipt({
+    hash,
+    status: TransactionStatus.FINALIZED,
+    fullTransaction: false,
+  });
+  if (receipt.txExecutionResultName !== ExecutionResult.FINISHED_WITH_RETURN) {
+    throw new Error(
+      `GenLayer contract execution failed: ${receipt.txExecutionResultName ?? "unknown execution result"}`,
+    );
+  }
   return hash;
 }
 export const joinQuiz=(id:number)=>write("join_quiz",[id]);
