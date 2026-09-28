@@ -1,4 +1,4 @@
-import { createClient, isSuccessful } from "genlayer-js";
+import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 
 export const QUIZAMBIG_CONTRACT_ADDRESS = "0x8B40151A03c27C5B0De2f8DB01c17a5cd36FB658" as const;
@@ -62,7 +62,7 @@ async function write(functionName:string,args:any[]){
   const account=await walletAddress(); const client=writeClient(account);
   const hash=await client.writeContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName,args,value:0n});
   const receipt=await client.waitForDecision({hash,interval:3000,retries:100});
-  if(!isSuccessful(receipt)) throw new Error(`GenLayer transaction failed: ${receipt.statusName??"unknown status"} / ${receipt.txExecutionResultName??"unknown execution result"}`);
+  if (receipt.statusName !== "ACCEPTED" && receipt.statusName !== "FINALIZED") throw new Error(`GenLayer transaction failed: ${receipt.statusName ?? "unknown status"} / ${receipt.txExecutionResultName ?? "unknown execution result"}`);\n  if (receipt.txExecutionResultName !== "FINISHED_WITH_RETURN") throw new Error(`GenLayer contract execution failed: ${receipt.statusName ?? "unknown status"} / ${receipt.txExecutionResultName ?? "unknown execution result"}`);
   return hash;
 }
 export const joinQuiz=(id:number)=>write("join_quiz",[id]);
