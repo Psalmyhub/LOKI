@@ -1,7 +1,3 @@
-import { createClient } from "genlayer-js";
-import { TransactionStatus } from "genlayer-js/types";
-import { studionet } from "genlayer-js/chains";
-
 export const QUIZAMBIG_CONTRACT_ADDRESS = "0x8B40151A03c27C5B0De2f8DB01c17a5cd36FB658" as const;
 export const QUIZAMBIG_OWNER = "0xB41f7CcF919515a4741C7AAd43cFfCd56A20Ee31" as const;
 
@@ -21,7 +17,13 @@ export type Evaluation = {
   response_time_seconds:number; submitted_at:number;
 };
 
-const readClient=()=>createClient({chain:studionet});
+async function readClient(){
+  const [{ createClient }, { studionet }] = await Promise.all([
+    import("genlayer-js"),
+    import("genlayer-js/chains"),
+  ]);
+  return createClient({ chain: studionet });
+}
 async function walletAddress():Promise<`0x${string}`>{
   if(!window.ethereum) throw new Error("No browser wallet detected.");
   const accounts=await window.ethereum.request({method:"eth_requestAccounts"});
@@ -29,9 +31,15 @@ async function walletAddress():Promise<`0x${string}`>{
   if(typeof address!=="string") throw new Error("No wallet account returned.");
   return address as `0x${string}`;
 }
-function writeClient(account:`0x${string}`){
+async function writeClient(account:`0x${string}`){
   if(!window.ethereum) throw new Error("No browser wallet detected.");
-  return createClient({chain:studionet,account,provider:window.ethereum});
+  const [{ createClient }, { studionet }] = await Promise.all([
+    import("genlayer-js"),
+    import("genlayer-js/chains"),
+  ]);
+  const client = createClient({ chain: studionet, account, provider: window.ethereum });
+  await client.connect("studionet");
+  return client;
 }
 export const connectWallet=walletAddress;
 async function sha256Hex(value:string):Promise<string>{
@@ -48,20 +56,21 @@ export async function publishQuiz(quizId:number,startTime:number,accessCommitmen
 export async function hashAccessToken(token:string){return sha256Hex(token);}
 export function generateAccessToken(){const bytes=new Uint8Array(32);crypto.getRandomValues(bytes);return Array.from(bytes).map(b=>b.toString(16).padStart(2,"0")).join("");}
 export function generateSalt(){const bytes=new Uint8Array(24);crypto.getRandomValues(bytes);return Array.from(bytes).map(b=>b.toString(16).padStart(2,"0")).join("");}
-export async function getNextQuestionId(){return Number(await readClient().readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_next_question_id",args:[]}));}
-export async function getNextQuizId(){return Number(await readClient().readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_next_quiz_id",args:[]}));}
-export async function getQuiz(id:number):Promise<Quiz>{return await readClient().readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_quiz",args:[id],jsonSafeReturn:true}) as Quiz;}
-export async function getCurrentQuestion(id:number):Promise<Question>{return await readClient().readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_current_question",args:[id],jsonSafeReturn:true}) as Question;}
-export async function getQuestion(id:number):Promise<Question>{return await readClient().readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_question",args:[id],jsonSafeReturn:true}) as Question;}
-export async function getQuestionId(quizId:number,index:number){return Number(await readClient().readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_question_id",args:[quizId,index]}));}
-export async function getPlayerStatus(id:number,player:`0x${string}`){return await readClient().readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_player_status",args:[id,player],jsonSafeReturn:true}) as {joined:boolean;quiz_id:number;player:string};}
-export async function getPlayerCount(id:number){return Number(await readClient().readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_player_count",args:[id]}));}
-export async function getPlayer(id:number,index:number){return String(await readClient().readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_player",args:[id,index]}));}
-export async function getEvaluation(questionId:number,player:`0x${string}`){return await readClient().readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_evaluation",args:[questionId,player],jsonSafeReturn:true}) as Evaluation;}
+export async function getNextQuestionId(){return Number(await (await readClient()).readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_next_question_id",args:[]}));}
+export async function getNextQuizId(){return Number(await (await readClient()).readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_next_quiz_id",args:[]}));}
+export async function getQuiz(id:number):Promise<Quiz>{return await (await readClient()).readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_quiz",args:[id],jsonSafeReturn:true}) as Quiz;}
+export async function getCurrentQuestion(id:number):Promise<Question>{return await (await readClient()).readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_current_question",args:[id],jsonSafeReturn:true}) as Question;}
+export async function getQuestion(id:number):Promise<Question>{return await (await readClient()).readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_question",args:[id],jsonSafeReturn:true}) as Question;}
+export async function getQuestionId(quizId:number,index:number){return Number(await (await readClient()).readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_question_id",args:[quizId,index]}));}
+export async function getPlayerStatus(id:number,player:`0x${string}`){return await (await readClient()).readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_player_status",args:[id,player],jsonSafeReturn:true}) as {joined:boolean;quiz_id:number;player:string};}
+export async function getPlayerCount(id:number){return Number(await (await readClient()).readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_player_count",args:[id]}));}
+export async function getPlayer(id:number,index:number){return String(await (await readClient()).readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_player",args:[id,index]}));}
+export async function getEvaluation(questionId:number,player:`0x${string}`){return await (await readClient()).readContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName:"get_evaluation",args:[questionId,player],jsonSafeReturn:true}) as Evaluation;}
 export async function evaluateSubmission(questionId:number,player:`0x${string}`,masterAnswer:string,salt:string){return write("evaluate_submission",[questionId,player,masterAnswer,salt]);}
 async function write(functionName:string,args:any[]){
-  const account=await walletAddress(); const client=writeClient(account);
+  const account=await walletAddress(); const client=await writeClient(account);
   const hash=await client.writeContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName,args,value:0n});
+  const { TransactionStatus } = await import("genlayer-js/types");
   const receipt=await client.waitForTransactionReceipt({
     hash,
     status: TransactionStatus.ACCEPTED,
