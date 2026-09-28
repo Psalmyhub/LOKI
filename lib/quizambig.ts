@@ -2,7 +2,7 @@ import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
 
-export const QUIZAMBIG_CONTRACT_ADDRESS = "0xC57Ac7ACF54bB4D4761Ff7150F455E190cc113E3" as const;
+export const QUIZAMBIG_CONTRACT_ADDRESS = "0x3Ee36285C7314C93F9419951b39A62B9eD4e38Fc" as const;
 export const QUIZAMBIG_OWNER = "0xB41f7CcF919515a4741C7AAd43cFfCd56A20Ee31" as const;
 
 type EthereumProvider = {
