@@ -66,9 +66,9 @@ async function write(functionName:string,args:any[]){
     hash,
     status: TransactionStatus.FINALIZED,
   });
-  if (receipt.txExecutionResultName !== ExecutionResult.FINISHED_WITH_RETURN) {
+  if (receipt.txExecutionResultName === ExecutionResult.FINISHED_WITH_ERROR) {
     throw new Error(
-      `GenLayer contract execution failed: ${receipt.txExecutionResultName ?? "unknown execution result"}`,
+      `GenLayer contract execution failed: ${receipt.txExecutionResultName}`,
     );
   }
   return hash;
