@@ -1,5 +1,5 @@
 import { createClient } from "genlayer-js";
-import { TransactionStatus, ExecutionResult } from "genlayer-js/types";
+import { TransactionStatus } from "genlayer-js/types";
 import { studionet } from "genlayer-js/chains";
 
 export const QUIZAMBIG_CONTRACT_ADDRESS = "0x8B40151A03c27C5B0De2f8DB01c17a5cd36FB658" as const;
@@ -66,7 +66,7 @@ async function write(functionName:string,args:any[]){
     hash,
     status: TransactionStatus.ACCEPTED,
   });
-  if (receipt.txExecutionResultName === ExecutionResult.FINISHED_WITH_ERROR) {
+  if (receipt.txExecutionResultName === "FINISHED_WITH_ERROR") {
     throw new Error(
       `GenLayer contract execution failed: ${receipt.txExecutionResultName}`,
     );
