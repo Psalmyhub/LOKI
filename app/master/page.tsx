@@ -44,6 +44,7 @@ export default function MasterPage() {
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [title, setTitle] = useState("");
   const [startDateTime, setStartDateTime] = useState("");
+  const [minStartDateTime, setMinStartDateTime] = useState("");
   const [accessLink, setAccessLink] = useState("");
   const [drafts, setDrafts] = useState<DraftQuestion[]>([blankQuestion()]);
   const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
@@ -52,6 +53,10 @@ export default function MasterPage() {
   const [error, setError] = useState("");
   const secretsRef = useRef<Record<string, Secret>>({});
   const evaluatedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    setMinStartDateTime(new Date(Date.now() + 60000).toISOString().slice(0, 16));
+  }, []);
 
   async function connect() {
     try {
@@ -234,7 +239,7 @@ export default function MasterPage() {
             </div>
             <div className="field">
               <label>Start date and time</label>
-              <input type="datetime-local" value={startDateTime} min={new Date(Date.now() + 60000).toISOString().slice(0, 16)} onChange={e => setStartDateTime(e.target.value)} />
+              <input type="datetime-local" value={startDateTime} min={minStartDateTime} onChange={e => setStartDateTime(e.target.value)} />
               <span className="small">Your local time. The blockchain stores the resulting UTC timestamp.</span>
             </div>
           </section>
@@ -304,7 +309,7 @@ export default function MasterPage() {
             <section className="card">
               <h2>Schedule quiz</h2>
               <p className="muted">All questions are already committed on-chain. The quiz remains scheduled until the selected start time.</p>
-              <div className="field"><label>Start date and time</label><input type="datetime-local" value={startDateTime} min={new Date(Date.now() + 60000).toISOString().slice(0, 16)} onChange={e => setStartDateTime(e.target.value)} /></div>
+              <div className="field"><label>Start date and time</label><input type="datetime-local" value={startDateTime} min={minStartDateTime} onChange={e => setStartDateTime(e.target.value)} /></div>
               <button className="primary" disabled={busy} onClick={publish}>{busy ? "Scheduling…" : "Schedule and publish"}</button>
             </section>
           )}
