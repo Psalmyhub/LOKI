@@ -12,6 +12,7 @@ import {
   getQuestionId,
   getCurrentQuestion,
   getQuiz,
+  hashAccessToken,
   joinQuiz,
   submitAnswer,
   type Evaluation,
@@ -26,8 +27,9 @@ type Row = {
   response: number;
 };
 
-export default function QuizPage({ params }: { params: Promise<{ id: string }> }) {
+export default function QuizPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ access?: string }> }) {
   const [quiz, setQuiz] = useState<Quiz | null>(null);
+  const [accessGranted, setAccessGranted] = useState(false);
   const [question, setQuestion] = useState<Question | null>(null);
   const [wallet, setWallet] = useState("");
   const [joined, setJoined] = useState(false);
@@ -45,26 +47,37 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
     void (async () => {
       try {
         const { id } = await params;
+        const { access } = await searchParams;
         const quizId = Number(id);
         if (!Number.isInteger(quizId) || quizId < 1) throw new Error("Invalid quiz id.");
+        if (!access) throw new Error("This quiz requires its private access link.");
         const q = await getQuiz(quizId);
+        const supplied = await hashAccessToken(access);
+        if (!q.access_commitment || supplied.toLowerCase() !== q.access_commitment.toLowerCase()) throw new Error("Invalid or expired quiz access link.");
         setQuiz(q);
+        setAccessGranted(true);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
     })();
-  }, [params]);
+  }, [params, searchParams]);
 
   useEffect(() => {
-    if (!quiz) return;
-    const timer = window.setInterval(() => {
-      setSecondsLeft(value => Math.max(0, value - 1));
-    }, 1000);
+    if (!quiz || !accessGranted) return;
+    const timer = window.setInterval(() => { setSecondsLeft(value => Math.max(0, value - 1)); }, 1000);
     return () => window.clearInterval(timer);
-  }, [quiz]);
+  }, [quiz, accessGranted]);
+
+  useEffect(() => {
+    if (!quiz || !accessGranted) return;
+    const refreshQuiz = async () => { try { setQuiz(await getQuiz(quiz.id)); } catch {} };
+    void refreshQuiz();
+    const timer = window.setInterval(() => { void refreshQuiz(); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [quiz?.id, accessGranted]);
 
   async function refreshWalletStatus() {
-    if (!quiz || !wallet) return;
+    if (!quiz || !accessGranted || !wallet) return;
     try {
       const status = await getPlayerStatus(quiz.id, wallet as `0x${string}`);
       setJoined(status.joined);
@@ -72,7 +85,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
   }
 
   async function refreshQuestion() {
-    if (!quiz) return null;
+    if (!quiz || !accessGranted) return null;
     try {
       const q = await getCurrentQuestion(quiz.id);
       setQuestion(previous => {
@@ -92,7 +105,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
   }
 
   async function refreshLeaderboard(target: Question) {
-    if (!quiz) return;
+    if (!quiz || !accessGranted) return;
     const count = await getPlayerCount(quiz.id);
     const rows: Row[] = [];
 
@@ -132,7 +145,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
   }
 
   async function refresh() {
-    if (!quiz) return;
+    if (!quiz || !accessGranted) return;
     const current = await refreshQuestion();
     if (!current) {
       const completedIndex = quiz.question_count - 1;
@@ -156,7 +169,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
   }
 
   useEffect(() => {
-    if (!quiz) return;
+    if (!quiz || !accessGranted) return;
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, 2500);
     return () => window.clearInterval(timer);
@@ -176,7 +189,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
   }
 
   async function join() {
-    if (!quiz) return;
+    if (!quiz || !accessGranted) return;
     setBusy(true); setError(""); setMessage("");
     try {
       await joinQuiz(quiz.id);
@@ -220,7 +233,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
       {error && <div className="error">{error}</div>}
       {message && <div className="success">{message}</div>}
 
-      {!quiz ? <div className="center">Loading quiz…</div> : (
+      {!quiz ? <div className="center">Checking private quiz link…</div> : !accessGranted ? <div className="center">This quiz requires a valid private access link.</div> : (
         <>
           <section className="quizHeader">
             <div className="eyebrow">{quiz.status} · Quiz #{quiz.id}</div>
@@ -230,6 +243,10 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
               {question && <span className="badge">Question {question.index + 1}</span>}
             </div>
           </section>
+
+          {quiz.status === "SCHEDULED" && (
+            <section className="card"><h2>Quiz scheduled</h2><p className="muted">This quiz is not open yet. It will start automatically at:</p><div className="badge">{new Date(quiz.start_at * 1000).toLocaleString()}</div></section>
+          )}
 
           {!joined && quiz.status === "ACTIVE" && (
             <section className="card">
