@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   connectWallet,
+  getNextQuizId,
+  getQuiz,
   QUIZAMBIG_CONTRACT_ADDRESS,
+  type Quiz,
 } from "../lib/quizambig";
 
 export default function HomePage() {
@@ -102,7 +105,7 @@ export default function HomePage() {
 
       <section className="section">
         <div className="card"><h2>Private quizzes</h2><p className="muted">Quizambig does not publish a public quiz directory. A Quiz Master shares a private access link with the intended audience.</p></div>
-      </section>>
+      </section>
     </main>
   );
 }
