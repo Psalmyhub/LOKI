@@ -6,7 +6,6 @@ import { connectWallet, QUIZAMBIG_CONTRACT_ADDRESS } from "../lib/quizambig";
 
 export default function HomePage() {
   const [wallet, setWallet] = useState("");
-  const [wallet, setWallet] = useState("");
   const [error, setError] = useState("");
 
   async function connect() {
