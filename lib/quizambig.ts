@@ -64,7 +64,7 @@ async function write(functionName:string,args:any[]){
   const hash=await client.writeContract({address:QUIZAMBIG_CONTRACT_ADDRESS,functionName,args,value:0n});
   const receipt=await client.waitForTransactionReceipt({
     hash,
-    status: TransactionStatus.FINALIZED,
+    status: TransactionStatus.ACCEPTED,
   });
   if (receipt.txExecutionResultName === ExecutionResult.FINISHED_WITH_ERROR) {
     throw new Error(
