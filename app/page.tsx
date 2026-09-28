@@ -2,54 +2,21 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import {
-  connectWallet,
-  getNextQuizId,
-  getQuiz,
-  QUIZAMBIG_CONTRACT_ADDRESS,
-  type Quiz,
-} from "../lib/quizambig";
+import { connectWallet, QUIZAMBIG_CONTRACT_ADDRESS } from "../lib/quizambig";
 
 export default function HomePage() {
   const [wallet, setWallet] = useState("");
-  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [wallet, setWallet] = useState("");
   const [error, setError] = useState("");
-
-  async function load() {
-    setLoading(true);
-    setError("");
-
-    try {
-      const next = await getNextQuizId();
-      const rows: Quiz[] = [];
-
-      for (let id = 1; id < next; id++) {
-        try {
-          rows.push(await getQuiz(id));
-        } catch {}
-      }
-
-      setQuizzes(rows.reverse());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, []);
 
   async function connect() {
     try {
+      setError("");
       setWallet(await connectWallet());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }
-
 
   return (
     <main className="shell">
@@ -87,10 +54,6 @@ export default function HomePage() {
         </p>
 
         <div className="actions">
-          <button className="secondary" onClick={() => void load()}>
-            Refresh
-          </button>
-
           <Link className="primary" href="/master">
             Create a quiz
           </Link>
