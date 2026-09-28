@@ -19,6 +19,7 @@ class Quizambig(gl.Contract):
     quiz_question_count: TreeMap[str, u32]
     quiz_created_at: TreeMap[str, u64]
     quiz_published_at: TreeMap[str, u64]
+    quiz_access_commitment: TreeMap[str, str]
     quiz_status: TreeMap[str, str]
 
     question_quiz_id: TreeMap[str, str]
@@ -150,7 +151,10 @@ class Quizambig(gl.Contract):
         total = self._quiz_total_duration(quiz_id)
         published = self.quiz_published_at[key]
         status = self.quiz_status[key]
-        if status == "ACTIVE" and published > 0 and self._now() >= published + total:
+        now = self._now()
+        if status == "SCHEDULED" and published > 0 and now >= published:
+            status = "ACTIVE"
+        if status == "ACTIVE" and published > 0 and now >= published + total:
             status = "COMPLETED"
         return {
             "id": quiz_id,
@@ -159,7 +163,9 @@ class Quizambig(gl.Contract):
             "question_count": self.quiz_question_count[key],
             "created_at": self.quiz_created_at[key],
             "published_at": published,
+            "start_at": published,
             "expires_at": published + total,
+            "access_commitment": self.quiz_access_commitment[key],
             "status": status,
         }
 
@@ -259,6 +265,7 @@ class Quizambig(gl.Contract):
         self.quiz_question_count[key] = question_count
         self.quiz_created_at[key] = self._now()
         self.quiz_published_at[key] = 0
+        self.quiz_access_commitment[key] = ""
         self.quiz_status[key] = "DRAFT"
         self.quiz_player_count[key] = 0
         return quiz_id
@@ -306,12 +313,23 @@ class Quizambig(gl.Contract):
         return count
 
     @gl.public.write
-    def publish_quiz(self, quiz_id: u32) -> None:
+    def publish_quiz(self, quiz_id: u32, start_time: u64, access_commitment: str) -> None:
         self._require_quiz_master(quiz_id)
         quiz_key = self._quiz_key(quiz_id)
         assert self.quiz_status[quiz_key] == "DRAFT", "quiz is not a draft"
         assert self.question_text_count_for_quiz(quiz_id) == self.quiz_question_count[quiz_key], "all questions must be added before publishing"
-        self.quiz_published_at[quiz_key] = self._now()
+        assert start_time >= self._now(), "start time cannot be in the past"
+        assert len(access_commitment) == 64, "access commitment must be a SHA-256 hex digest"
+        self.quiz_published_at[quiz_key] = start_time
+        self.quiz_access_commitment[quiz_key] = access_commitment.lower()
+        self.quiz_status[quiz_key] = "ACTIVE" if start_time <= self._now() else "SCHEDULED"
+
+    @gl.public.write
+    def activate_quiz(self, quiz_id: u32) -> None:
+        self._require_quiz_exists(quiz_id)
+        quiz_key = self._quiz_key(quiz_id)
+        assert self.quiz_status[quiz_key] == "SCHEDULED", "quiz is not scheduled"
+        assert self._now() >= self.quiz_published_at[quiz_key], "quiz start time has not been reached"
         self.quiz_status[quiz_key] = "ACTIVE"
 
     @gl.public.write
@@ -320,6 +338,8 @@ class Quizambig(gl.Contract):
         quiz_key = self._quiz_key(quiz_id)
         player = gl.message.sender_address
         player_key = self._player_key(quiz_id, player)
+        if self.quiz_status[quiz_key] == "SCHEDULED" and self._now() >= self.quiz_published_at[quiz_key]:
+            self.quiz_status[quiz_key] = "ACTIVE"
         assert self.quiz_status[quiz_key] == "ACTIVE", "quiz is not active"
         assert self._now() < self.quiz_published_at[quiz_key] + self._quiz_total_duration(quiz_id), "quiz has ended"
         assert not self.player_joined[player_key], "player has already joined"
