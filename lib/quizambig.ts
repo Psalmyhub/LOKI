@@ -21,7 +21,9 @@ export type Quiz = {
   question_count: number;
   created_at: number;
   published_at: number;
+  start_at: number;
   expires_at: number;
+  access_commitment: string;
   status: string;
 };
 
@@ -97,8 +99,18 @@ export async function addQuestion(
   ]);
 }
 
-export async function publishQuiz(quizId: number) {
-  return write("publish_quiz", [quizId]);
+export async function publishQuiz(quizId: number, startTime: number, accessCommitment: string) {
+  return write("publish_quiz", [quizId, startTime, accessCommitment]);
+}
+
+export async function hashAccessToken(token: string): Promise<string> {
+  return sha256Hex(token);
+}
+
+export function generateAccessToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export function generateSalt() {
