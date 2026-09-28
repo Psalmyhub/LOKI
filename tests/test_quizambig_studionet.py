@@ -83,7 +83,9 @@ def test_quizambig_automatic_async_evaluation(default_account, accounts):
     assert_success(receipt, "add_question_q2")
     assert q2_id == q1_id + 1
 
-    receipt = contract.publish_quiz(args=[quiz_id]).transact(
+    start_time = int(time.time()) + 1
+    access_commitment = hashlib.sha256(b"test-access-token").hexdigest()
+    receipt = contract.publish_quiz(args=[quiz_id, start_time, access_commitment]).transact(
         consensus_max_rotations=5, wait_interval=3000, wait_retries=100
     )
     assert_success(receipt, "publish_quiz")
