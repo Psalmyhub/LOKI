@@ -8,6 +8,8 @@ import {
   createQuiz,
   evaluateSubmission,
   generateSalt,
+  generateAccessToken,
+  hashAccessToken,
   getCurrentQuestion,
   getEvaluation,
   getNextQuizId,
@@ -41,7 +43,9 @@ export default function MasterPage() {
   const [wallet, setWallet] = useState("");
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [title, setTitle] = useState("");
-  const [drafts, setDrafts] = useState<DraftQuestion[]>([blankQuestion()]);
+  const [startDateTime, setStartDateTime] = useState("");
+  const [accessLink, setAccessLink] = useState("");
+  const [drafts, setDrafts = useState<DraftQuestion[]>([blankQuestion()]);
   const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -106,9 +110,18 @@ export default function MasterPage() {
     if (!quiz) return;
     setBusy(true); setError(""); setMessage("");
     try {
-      await publishQuiz(quiz.id);
+      if (!startDateTime) throw new Error("Choose the quiz start date and time.");
+      const startTime = Math.floor(new Date(startDateTime).getTime() / 1000);
+      const now = Math.floor(Date.now() / 1000);
+      if (!Number.isFinite(startTime) || startTime < now) throw new Error("Quiz start time must be now or in the future.");
+      const token = generateAccessToken();
+      const accessCommitment = await hashAccessToken(token);
+      await publishQuiz(quiz.id, startTime, accessCommitment);
+      const link = `${window.location.origin}/quiz/${quiz.id}?access=${token}`;
+      sessionStorage.setItem(`quizambig:access:${quiz.id}`, token);
+      setAccessLink(link);
       setQuiz(await getQuiz(quiz.id));
-      setMessage("Published once. Question timing and progression are now automatic.");
+      setMessage("Quiz committed on-chain and scheduled. Share the private link with your audience.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
@@ -152,6 +165,14 @@ export default function MasterPage() {
       }
     }
   }
+
+  useEffect(() => {
+    if (!quiz || quiz.status === "DRAFT") return;
+    const refreshQuiz = async () => { try { setQuiz(await getQuiz(quiz.id)); } catch {} };
+    void refreshQuiz();
+    const timer = window.setInterval(() => { void refreshQuiz(); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [quiz?.id]);
 
   useEffect(() => {
     if (!quiz || quiz.status !== "ACTIVE" || !wallet) return;
@@ -211,6 +232,11 @@ export default function MasterPage() {
               <label>Quiz title</label>
               <input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. General Knowledge" />
             </div>
+            <div className="field">
+              <label>Start date and time</label>
+              <input type="datetime-local" value={startDateTime} min={new Date(Date.now() + 60000).toISOString().slice(0, 16)} onChange={e => setStartDateTime(e.target.value)} />
+              <span className="small">Your local time. The blockchain stores the resulting UTC timestamp.</span>
+            </div>
           </section>
 
           <section className="section">
@@ -260,7 +286,7 @@ export default function MasterPage() {
               <div>
                 <div className="stepLabel">Final step</div>
                 <h3>{drafts.length} questions ready</h3>
-                <p className="muted">Create the complete quiz on-chain, then publish it once.</p>
+                <p className="muted">Create the complete quiz on-chain first. Then choose the start time and publish once.</p>
               </div>
               <button className="primary" disabled={busy} onClick={create}>{busy ? "Preparing…" : "Create quiz on-chain"}</button>
             </div>
@@ -276,10 +302,19 @@ export default function MasterPage() {
 
           {quiz.status === "DRAFT" && (
             <section className="card">
-              <h2>Ready to publish</h2>
-              <p className="muted">Publishing starts the blockchain clock. All questions are already committed and will become active according to their stored durations.</p>
-              <button className="primary" disabled={busy} onClick={publish}>{busy ? "Publishing…" : "Publish quiz once"}</button>
+              <h2>Schedule quiz</h2>
+              <p className="muted">All questions are already committed on-chain. The quiz remains scheduled until the selected start time.</p>
+              <div className="field"><label>Start date and time</label><input type="datetime-local" value={startDateTime} min={new Date(Date.now() + 60000).toISOString().slice(0, 16)} onChange={e => setStartDateTime(e.target.value)} /></div>
+              <button className="primary" disabled={busy} onClick={publish}>{busy ? "Scheduling…" : "Schedule and publish"}</button>
             </section>
+          )}
+
+          {accessLink && (quiz.status === "SCHEDULED" || quiz.status === "ACTIVE" || quiz.status === "COMPLETED") && (
+            <section className="card"><h2>Private quiz link</h2><p className="muted">Only people with this link can open the quiz through Quizambig.</p><input readOnly value={accessLink} onFocus={e => e.currentTarget.select()} /><div className="actions"><button className="secondary" type="button" onClick={() => void navigator.clipboard.writeText(accessLink)}>Copy link</button></div></section>
+          )}
+
+          {quiz.status === "SCHEDULED" && (
+            <section className="card"><h2>Quiz scheduled</h2><p className="muted">The quiz is committed on-chain and will become active at the selected time.</p><div className="badge">{new Date(quiz.start_at * 1000).toLocaleString()}</div></section>
           )}
 
           {quiz.status === "ACTIVE" && (
@@ -305,7 +340,7 @@ export default function MasterPage() {
                   <p className="muted">No start, close, reveal, or evaluation button is required. This page automatically triggers pending GenLayer judgments as soon as submissions exist.</p>
                 </>
               ) : <p className="muted">Waiting for the blockchain schedule…</p>}
-              <div className="actions"><Link className="secondary" href={`/quiz/${quiz.id}`}>Open player view</Link></div>
+              <div className="actions"><Link className="secondary" href={accessLink || `/quiz/${quiz.id}`}>Open player view</Link></div>
               </section>
             </>
           )}
