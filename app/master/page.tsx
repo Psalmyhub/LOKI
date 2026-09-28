@@ -45,7 +45,7 @@ export default function MasterPage() {
   const [title, setTitle] = useState("");
   const [startDateTime, setStartDateTime] = useState("");
   const [accessLink, setAccessLink] = useState("");
-  const [drafts, setDrafts = useState<DraftQuestion[]>([blankQuestion()]);
+  const [drafts, setDrafts] = useState<DraftQuestion[]>([blankQuestion()]);
   const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
