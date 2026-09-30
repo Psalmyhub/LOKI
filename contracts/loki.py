@@ -88,7 +88,7 @@ class Loki(gl.Contract):
     def _fee(self, gross_pool: int) -> int:
         return gross_pool * PLATFORM_FEE_BPS // BPS_DENOMINATOR
 
-    @gl.public.write.payable
+    @gl.public.write
     def create_loki(
         self,
         title: str,
@@ -126,6 +126,9 @@ class Loki(gl.Contract):
             "total_pool": "0",
             "random_choice": "",
             "randomness_verified": False,
+            "randomness_input_hash": "",
+            "randomness_entropy": "",
+            "randomness_consensus": "",
             "winner_count": "0",
             "platform_fee": "0",
             "prize_pool": "0",
@@ -220,6 +223,27 @@ class Loki(gl.Contract):
         entry["revealed"] = True
         self._save_entry(entry)
 
+    def _randomness_input_hash(self, loki: dict) -> str:
+        snapshot = []
+        for entry_id in loki.get("entry_ids", []):
+            entry = self._entry(entry_id)
+            snapshot.append({
+                "id": entry["id"],
+                "player": entry["player"].lower(),
+                "commitment": entry["commitment"],
+            })
+
+        payload = {
+            "version": "loki-random-v1",
+            "loki_id": loki["id"],
+            "choices": loki["choices"],
+            "entry_amount": loki["entry_amount"],
+            "closes_at": loki["closes_at"],
+            "participant_count": loki["participant_count"],
+            "entries": snapshot,
+        }
+        return _digest(_json(payload))
+
     @gl.public.write
     def close_loki(self, loki_id: str) -> None:
         loki = self._loki(loki_id)
@@ -230,22 +254,33 @@ class Loki(gl.Contract):
         if int(gl.message_raw["datetime"]) < int(loki["closes_at"]):
             raise gl.vm.UserError("[EXPECTED] closing time has not arrived")
 
+        # Freeze the exact game snapshot that randomness must be bound to.
+        # The caller is deliberately excluded, so a finalizer cannot choose
+        # an outcome by changing caller identity.
+        loki["randomness_input_hash"] = self._randomness_input_hash(loki)
         loki["status"] = "CLOSED"
         self._save_loki(loki)
 
     @gl.public.write
     def resolve_randomness(self, loki_id: str) -> None:
         """
-        Security boundary reserved for the verified GenLayer-supported
-        randomness primitive.
+        Secure randomness boundary.
 
-        This function intentionally does not accept a caller-supplied random
-        choice or seed. It must only store a result produced and accepted by
-        GenLayer's supported randomness/consensus mechanism.
+        No caller-supplied seed, choice, nonce, timestamp, or finalizer
+        identity is accepted. The contract fails closed until GenLayer
+        exposes its transaction randomSeed to Intelligent Contract code.
         """
+        loki = self._loki(loki_id)
+
+        if loki["status"] != "CLOSED":
+            raise gl.vm.UserError("[EXPECTED] LOKI must be closed")
+
+        if not loki["randomness_input_hash"]:
+            raise gl.vm.UserError("[EXPECTED] randomness input is not frozen")
+
         raise gl.vm.UserError(
-            "[EXPECTED] randomness adapter is not wired yet; "
-            "no caller may supply the winning choice"
+            "[EXPECTED] secure GenLayer randomness adapter is not exposed to "
+            "Intelligent Contracts yet; refusing unsafe fallback"
         )
 
     @gl.public.write
