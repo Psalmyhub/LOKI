@@ -355,14 +355,20 @@ class Loki(gl.Contract):
         if not loki["randomness_verified"]:
             raise gl.vm.UserError("[EXPECTED] randomness is not verified")
 
+        # Settlement cannot be triggered before players have had a chance to
+        # reveal their committed choices. This prevents an early settler from
+        # turning unrevealed entries into refunds.
+        for entry_id in loki.get("entry_ids", []):
+            entry = self._entry(entry_id)
+            if not entry["revealed"]:
+                raise gl.vm.UserError(
+                    "[EXPECTED] all committed choices must be revealed before settlement"
+                )
+
         winners: list[str] = []
 
         for entry_id in loki.get("entry_ids", []):
             entry = self._entry(entry_id)
-            if not entry["revealed"]:
-                entry["settlement"] = "REFUND"
-                self._save_entry(entry)
-                continue
 
             entry["is_winner"] = (
                 entry["choice"].casefold() == loki["random_choice"].casefold()
