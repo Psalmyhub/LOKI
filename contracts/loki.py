@@ -196,7 +196,7 @@ class Loki(gl.Contract):
         if entry["player"].lower() != str(gl.message.sender_address).lower():
             raise gl.vm.UserError("[EXPECTED] only the player can reveal")
 
-        if loki["status"] != "CLOSED":
+        if loki["status"] not in ("CLOSED", "RANDOMIZED"):
             raise gl.vm.UserError("[EXPECTED] LOKI must be closed before reveal")
 
         if entry["revealed"]:
@@ -254,16 +254,11 @@ class Loki(gl.Contract):
         if int(gl.message_raw["datetime"]) < int(loki["closes_at"]):
             raise gl.vm.UserError("[EXPECTED] closing time has not arrived")
 
-        # Freeze the complete game snapshot BEFORE randomness is sampled.
-        # The caller/finalizer is intentionally excluded from this snapshot.
         loki["randomness_input_hash"] = self._randomness_input_hash(loki)
         randomness_input_hash = loki["randomness_input_hash"]
         choices = list(loki["choices"])
 
         def get_transaction_seed() -> bytes:
-            # GenLayer documents stdin as a transaction-bound seed source.
-            # It is read inside the nondeterministic block so every validator
-            # evaluates the same transaction-specific entropy independently.
             import os
 
             stream = os.fdopen(0, "rb", buffering=0, closefd=False)
@@ -316,9 +311,6 @@ class Loki(gl.Contract):
             digest = hashlib.sha256(material).hexdigest()
             index = int(digest, 16) % len(choices)
 
-            # The validator independently derives the candidate from the same
-            # immutable transaction seed and frozen game snapshot. It does not
-            # merely accept the leader's proposed winner.
             return (
                 proposed.get("seed_hash") == hashlib.sha256(seed).hexdigest()
                 and proposed.get("digest") == digest
@@ -331,8 +323,6 @@ class Loki(gl.Contract):
         if not isinstance(result, dict):
             raise gl.vm.UserError("[EXPECTED] randomness consensus failed")
 
-        # Only the consensus-agreed result crosses back into deterministic
-        # execution. The finalizer cannot supply or alter any randomness input.
         loki["random_choice"] = result["choice"]
         loki["randomness_entropy"] = result["seed_hash"]
         loki["randomness_consensus"] = result["digest"]
@@ -342,9 +332,6 @@ class Loki(gl.Contract):
 
     @gl.public.write
     def resolve_randomness(self, loki_id: str) -> None:
-        # Randomness is deliberately resolved during close_loki, using the
-        # close transaction's immutable transaction-bound seed. A later
-        # finalizer must never receive a second chance to supply/grind entropy.
         loki = self._loki(loki_id)
 
         if loki["status"] == "RANDOMIZED":
