@@ -326,7 +326,7 @@ class Loki(gl.Contract):
                 and proposed.get("choice") == choices[index]
             )
 
-        result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        result = gl.vm.run_nondet(leader_fn, validator_fn)
 
         if not isinstance(result, dict):
             raise gl.vm.UserError("[EXPECTED] randomness consensus failed")
