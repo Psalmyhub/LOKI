@@ -32,7 +32,7 @@ def commitment(loki_id, player, choice, nonce):
 
 
 def deploy(account):
-    factory = get_contract_factory(contract_file_path="contracts/loki.py")
+    factory = get_contract_factory(contract_file_path="loki.py")
     return factory.deploy(
         account=account,
         transaction_context={"genvm_datetime": BEFORE_CLOSE},
