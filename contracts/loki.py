@@ -254,33 +254,105 @@ class Loki(gl.Contract):
         if int(gl.message_raw["datetime"]) < int(loki["closes_at"]):
             raise gl.vm.UserError("[EXPECTED] closing time has not arrived")
 
-        # Freeze the exact game snapshot that randomness must be bound to.
-        # The caller is deliberately excluded, so a finalizer cannot choose
-        # an outcome by changing caller identity.
+        # Freeze the complete game snapshot BEFORE randomness is sampled.
+        # The caller/finalizer is intentionally excluded from this snapshot.
         loki["randomness_input_hash"] = self._randomness_input_hash(loki)
-        loki["status"] = "CLOSED"
+        randomness_input_hash = loki["randomness_input_hash"]
+        choices = list(loki["choices"])
+
+        def get_transaction_seed() -> bytes:
+            # GenLayer documents stdin as a transaction-bound seed source.
+            # It is read inside the nondeterministic block so every validator
+            # evaluates the same transaction-specific entropy independently.
+            import os
+
+            stream = os.fdopen(0, "rb", buffering=0, closefd=False)
+            stream.seek(0)
+            digest = hashlib.sha256()
+            while True:
+                chunk = stream.read(8192)
+                if not chunk:
+                    return digest.digest()
+                digest.update(chunk)
+
+        def leader_fn() -> dict:
+            seed = get_transaction_seed()
+            material = (
+                b"LOKI/randomness/v1|"
+                + randomness_input_hash.encode("utf-8")
+                + b"|"
+                + seed
+            )
+            digest = hashlib.sha256(material).hexdigest()
+            index = int(digest, 16) % len(choices)
+            return {
+                "version": "loki-random-v1",
+                "input_hash": randomness_input_hash,
+                "seed_hash": hashlib.sha256(seed).hexdigest(),
+                "digest": digest,
+                "index": index,
+                "choice": choices[index],
+            }
+
+        def validator_fn(leader_result) -> bool:
+            if not isinstance(leader_result, gl.vm.Return):
+                return False
+
+            proposed = leader_result.calldata
+            if not isinstance(proposed, dict):
+                return False
+            if proposed.get("version") != "loki-random-v1":
+                return False
+            if proposed.get("input_hash") != randomness_input_hash:
+                return False
+
+            seed = get_transaction_seed()
+            material = (
+                b"LOKI/randomness/v1|"
+                + randomness_input_hash.encode("utf-8")
+                + b"|"
+                + seed
+            )
+            digest = hashlib.sha256(material).hexdigest()
+            index = int(digest, 16) % len(choices)
+
+            # The validator independently derives the candidate from the same
+            # immutable transaction seed and frozen game snapshot. It does not
+            # merely accept the leader's proposed winner.
+            return (
+                proposed.get("seed_hash") == hashlib.sha256(seed).hexdigest()
+                and proposed.get("digest") == digest
+                and proposed.get("index") == index
+                and proposed.get("choice") == choices[index]
+            )
+
+        result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+
+        if not isinstance(result, dict):
+            raise gl.vm.UserError("[EXPECTED] randomness consensus failed")
+
+        # Only the consensus-agreed result crosses back into deterministic
+        # execution. The finalizer cannot supply or alter any randomness input.
+        loki["random_choice"] = result["choice"]
+        loki["randomness_entropy"] = result["seed_hash"]
+        loki["randomness_consensus"] = result["digest"]
+        loki["randomness_verified"] = True
+        loki["status"] = "RANDOMIZED"
         self._save_loki(loki)
 
     @gl.public.write
     def resolve_randomness(self, loki_id: str) -> None:
-        """
-        Secure randomness boundary.
-
-        No caller-supplied seed, choice, nonce, timestamp, or finalizer
-        identity is accepted. The contract fails closed until GenLayer
-        exposes its transaction randomSeed to Intelligent Contract code.
-        """
+        # Randomness is deliberately resolved during close_loki, using the
+        # close transaction's immutable transaction-bound seed. A later
+        # finalizer must never receive a second chance to supply/grind entropy.
         loki = self._loki(loki_id)
 
-        if loki["status"] != "CLOSED":
-            raise gl.vm.UserError("[EXPECTED] LOKI must be closed")
-
-        if not loki["randomness_input_hash"]:
-            raise gl.vm.UserError("[EXPECTED] randomness input is not frozen")
+        if loki["status"] == "RANDOMIZED":
+            raise gl.vm.UserError("[EXPECTED] randomness already resolved")
 
         raise gl.vm.UserError(
-            "[EXPECTED] secure GenLayer randomness adapter is not exposed to "
-            "Intelligent Contracts yet; refusing unsafe fallback"
+            "[EXPECTED] randomness resolves atomically with close_loki; "
+            "caller-supplied randomness is forbidden"
         )
 
     @gl.public.write
