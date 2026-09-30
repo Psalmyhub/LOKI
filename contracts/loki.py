@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from datetime import datetime, timezone
 
 from genlayer import *
 
@@ -19,6 +20,10 @@ def _json(value) -> str:
 
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _now() -> int:
+    return int(datetime.fromisoformat(gl.message_raw["datetime"].replace("Z", "+00:00")).timestamp())
 
 
 def _text(value: str, name: str, maximum: int = MAX_LABEL_LENGTH) -> str:
@@ -105,7 +110,7 @@ class Loki(gl.Contract):
         if amount <= 0:
             raise gl.vm.UserError("[EXPECTED] entry amount must be greater than zero")
 
-        now = int(gl.message_raw["datetime"])
+        now = _now()
         close_time = int(closes_at)
         if close_time <= now:
             raise gl.vm.UserError("[EXPECTED] closing time must be in the future")
@@ -147,7 +152,7 @@ class Loki(gl.Contract):
         if loki["status"] != "OPEN":
             raise gl.vm.UserError("[EXPECTED] LOKI is not open")
 
-        if int(gl.message_raw["datetime"]) >= int(loki["closes_at"]):
+        if _now() >= int(loki["closes_at"]):
             raise gl.vm.UserError("[EXPECTED] LOKI is closed")
 
         payment = int(gl.message.value)
@@ -251,7 +256,7 @@ class Loki(gl.Contract):
         if loki["status"] != "OPEN":
             raise gl.vm.UserError("[EXPECTED] LOKI is not open")
 
-        if int(gl.message_raw["datetime"]) < int(loki["closes_at"]):
+        if _now() < int(loki["closes_at"]):
             raise gl.vm.UserError("[EXPECTED] closing time has not arrived")
 
         loki["randomness_input_hash"] = self._randomness_input_hash(loki)
