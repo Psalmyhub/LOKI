@@ -4,7 +4,7 @@ import json
 import pytest
 
 from gltest import get_contract_factory
-from gltest.assertions import tx_execution_succeeded
+from gltest.assertions import tx_execution_failed, tx_execution_succeeded
 
 
 BEFORE_CLOSE = "2030-01-01T00:00:00Z"
@@ -76,16 +76,16 @@ def test_create_loki_stores_immutable_rules(default_account):
 def test_duplicate_choices_rejected(default_account):
     contract = deploy(default_account)
 
-    with pytest.raises(Exception):
-        contract.create_loki(
-            args=[
-                "Bad Loki",
-                "color",
-                ["red", "RED"],
-                ENTRY_AMOUNT,
-                CLOSES_AT,
-            ]
-        ).transact(transaction_context={"genvm_datetime": BEFORE_CLOSE})
+    tx = contract.create_loki(
+        args=[
+            "Bad Loki",
+            "color",
+            ["red", "RED"],
+            ENTRY_AMOUNT,
+            CLOSES_AT,
+        ]
+    ).transact(transaction_context={"genvm_datetime": BEFORE_CLOSE})
+    assert tx_execution_failed(tx)
 
 
 def test_exact_payment_and_one_wallet_one_entry(default_account, accounts):
@@ -100,11 +100,11 @@ def test_exact_payment_and_one_wallet_one_entry(default_account, accounts):
     )
     assert tx_execution_succeeded(tx)
 
-    with pytest.raises(Exception):
-        player.enter_loki(args=[loki_id, c]).transact(
-            value=ENTRY_AMOUNT,
-            transaction_context={"genvm_datetime": BEFORE_CLOSE},
-        )
+    tx = player.enter_loki(args=[loki_id, c]).transact(
+        value=ENTRY_AMOUNT,
+        transaction_context={"genvm_datetime": BEFORE_CLOSE},
+    )
+    assert tx_execution_failed(tx)
 
 
 def test_wrong_payment_rejected(default_account, accounts):
@@ -113,11 +113,11 @@ def test_wrong_payment_rejected(default_account, accounts):
     player = contract.connect(accounts[0])
     c = commitment(loki_id, accounts[0].address, "red", "nonce-1")
 
-    with pytest.raises(Exception):
-        player.enter_loki(args=[loki_id, c]).transact(
-            value=ENTRY_AMOUNT - 1,
-            transaction_context={"genvm_datetime": BEFORE_CLOSE},
-        )
+    tx = player.enter_loki(args=[loki_id, c]).transact(
+        value=ENTRY_AMOUNT - 1,
+        transaction_context={"genvm_datetime": BEFORE_CLOSE},
+    )
+    assert tx_execution_failed(tx)
 
 
 def test_reveal_requires_matching_commitment(default_account, accounts):
@@ -132,10 +132,10 @@ def test_reveal_requires_matching_commitment(default_account, accounts):
     )
     assert tx_execution_succeeded(tx)
 
-    with pytest.raises(Exception):
-        player.reveal_choice(
-            args=["entry-1", "blue", "nonce-1"]
-        ).transact(transaction_context={"genvm_datetime": AFTER_CLOSE})
+    tx = player.reveal_choice(
+        args=["entry-1", "blue", "nonce-1"]
+    ).transact(transaction_context={"genvm_datetime": AFTER_CLOSE})
+    assert tx_execution_failed(tx)
 
 
 def test_close_uses_transaction_bound_randomness_and_freezes_input(default_account):
@@ -156,10 +156,10 @@ def test_close_uses_transaction_bound_randomness_and_freezes_input(default_accou
     assert len(loki["randomness_consensus"]) == 64
     assert loki["random_choice"] in loki["choices"]
 
-    with pytest.raises(Exception):
-        contract.resolve_randomness(args=[loki_id]).transact(
-            transaction_context={"genvm_datetime": AFTER_CLOSE}
-        )
+    tx = contract.resolve_randomness(args=[loki_id]).transact(
+        transaction_context={"genvm_datetime": AFTER_CLOSE}
+    )
+    assert tx_execution_failed(tx)
 
 
 def test_reveal_is_allowed_after_randomization(default_account, accounts):
