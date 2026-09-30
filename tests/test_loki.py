@@ -3,7 +3,14 @@ import json
 
 import pytest
 
-from gltest import direct_deploy
+from gltest import get_contract_factory
+from gltest.assertions import tx_execution_succeeded
+
+
+BEFORE_CLOSE = "2030-01-01T00:00:00Z"
+AFTER_CLOSE = "2030-01-01T00:01:00Z"
+CLOSES_AT = 1_893_456_001
+ENTRY_AMOUNT = 10
 
 
 def commitment(loki_id, player, choice, nonce):
@@ -15,90 +22,239 @@ def commitment(loki_id, player, choice, nonce):
         "nonce": nonce,
     }
     return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
     ).hexdigest()
 
 
-def test_initial_state():
-    contract = direct_deploy("contracts/loki.py")
-    assert contract.get_platform_fees() == 0
-
-
-def test_create_loki_stores_immutable_rules():
-    contract = direct_deploy("contracts/loki.py")
-
-    loki_id = contract.create_loki(
-        args=[
-            "Guess the Color",
-            "color",
-            ["orange", "pink", "red", "blue", "green"],
-            10,
-            2_000_000_000,
-        ]
+def deploy(account):
+    return get_contract_factory("Loki").deploy(
+        account=account,
+        transaction_context={"genvm_datetime": BEFORE_CLOSE},
     )
 
-    loki = contract.get_loki(args=[loki_id])
 
-    assert loki["title"] == "Guess the Color"
+def create_loki(contract, transaction_context=None, choices=None, entry_amount=ENTRY_AMOUNT):
+    choices = choices or ["red", "blue", "green"]
+    tx = contract.create_loki(
+        args=[
+            "Loki integration test",
+            "color",
+            choices,
+            entry_amount,
+            CLOSES_AT,
+        ]
+    ).transact(transaction_context=transaction_context or {"genvm_datetime": BEFORE_CLOSE})
+    assert tx_execution_succeeded(tx)
+    return contract.loki_ids.call()[-1]
+
+
+def test_initial_state(default_account):
+    contract = deploy(default_account)
+    assert contract.get_platform_fees().call() == 0
+
+
+def test_create_loki_stores_immutable_rules(default_account):
+    contract = deploy(default_account)
+    loki_id = create_loki(contract)
+    loki = contract.get_loki(args=[loki_id]).call()
+
+    assert loki["title"] == "Loki integration test"
     assert loki["category"] == "color"
-    assert loki["choices"] == ["orange", "pink", "red", "blue", "green"]
+    assert loki["choices"] == ["red", "blue", "green"]
     assert loki["entry_amount"] == "10"
     assert loki["status"] == "OPEN"
     assert loki["randomness_input_hash"] == ""
 
 
-def test_duplicate_choices_rejected():
-    contract = direct_deploy("contracts/loki.py")
+def test_duplicate_choices_rejected(default_account):
+    contract = deploy(default_account)
 
     with pytest.raises(Exception):
         contract.create_loki(
             args=[
-                "Bad LOKI",
+                "Bad Loki",
                 "color",
                 ["red", "RED"],
-                10,
-                2_000_000_000,
+                ENTRY_AMOUNT,
+                CLOSES_AT,
             ]
+        ).transact(transaction_context={"genvm_datetime": BEFORE_CLOSE})
+
+
+def test_exact_payment_and_one_wallet_one_entry(default_account, accounts):
+    contract = deploy(default_account)
+    loki_id = create_loki(contract)
+
+    player = contract.connect(accounts[0])
+    c = commitment(loki_id, accounts[0].address, "red", "nonce-1")
+
+    tx = player.enter_loki(args=[loki_id, c]).transact(
+        value=ENTRY_AMOUNT,
+        transaction_context={"genvm_datetime": BEFORE_CLOSE},
+    )
+    assert tx_execution_succeeded(tx)
+
+    with pytest.raises(Exception):
+        player.enter_loki(args=[loki_id, c]).transact(
+            value=ENTRY_AMOUNT,
+            transaction_context={"genvm_datetime": BEFORE_CLOSE},
         )
 
 
-def test_randomness_cannot_be_caller_supplied():
-    contract = direct_deploy("contracts/loki.py")
-
-    loki_id = contract.create_loki(
-        args=[
-            "Guess",
-            "color",
-            ["red", "blue"],
-            10,
-            2_000_000_000,
-        ]
-    )
+def test_wrong_payment_rejected(default_account, accounts):
+    contract = deploy(default_account)
+    loki_id = create_loki(contract)
+    player = contract.connect(accounts[0])
+    c = commitment(loki_id, accounts[0].address, "red", "nonce-1")
 
     with pytest.raises(Exception):
-        contract.resolve_randomness(args=[loki_id])
+        player.enter_loki(args=[loki_id, c]).transact(
+            value=ENTRY_AMOUNT - 1,
+            transaction_context={"genvm_datetime": BEFORE_CLOSE},
+        )
 
 
-def test_close_freezes_randomness_input_and_excludes_finalizer():
-    contract = direct_deploy("contracts/loki.py")
+def test_reveal_requires_matching_commitment(default_account, accounts):
+    contract = deploy(default_account)
+    loki_id = create_loki(contract)
+    player = contract.connect(accounts[0])
+    c = commitment(loki_id, accounts[0].address, "red", "nonce-1")
 
-    loki_id = contract.create_loki(
-        args=[
-            "Frozen draw",
-            "color",
-            ["red", "blue"],
-            10,
-            1,
-        ]
+    tx = player.enter_loki(args=[loki_id, c]).transact(
+        value=ENTRY_AMOUNT,
+        transaction_context={"genvm_datetime": BEFORE_CLOSE},
     )
+    assert tx_execution_succeeded(tx)
 
-    # Direct-test runtime starts at a fixed clock; close_at=1 is immediately
-    # reachable in the test VM.
-    contract.close_loki(args=[loki_id])
-    loki = contract.get_loki(args=[loki_id])
+    entry_id = contract.entry_ids.call()[-1]
 
-    assert loki["status"] == "CLOSED"
+    with pytest.raises(Exception):
+        player.reveal_choice(args=[entry_id, "blue", "nonce-1"]).transact(
+            transaction_context={"genvm_datetime": AFTER_CLOSE},
+        )
+
+
+def test_close_uses_transaction_bound_randomness_and_freezes_input(default_account):
+    contract = deploy(default_account)
+    loki_id = create_loki(contract)
+
+    tx = contract.close_loki(args=[loki_id]).transact(
+        transaction_context={"genvm_datetime": AFTER_CLOSE}
+    )
+    assert tx_execution_succeeded(tx)
+
+    loki = contract.get_loki(args=[loki_id]).call()
+
+    assert loki["status"] == "RANDOMIZED"
+    assert loki["randomness_verified"] is True
     assert len(loki["randomness_input_hash"]) == 64
+    assert len(loki["randomness_entropy"]) == 64
+    assert len(loki["randomness_consensus"]) == 64
+    assert loki["random_choice"] in loki["choices"]
 
     with pytest.raises(Exception):
-        contract.resolve_randomness(args=[loki_id])
+        contract.resolve_randomness(args=[loki_id]).transact(
+            transaction_context={"genvm_datetime": AFTER_CLOSE}
+        )
+
+
+def test_reveal_is_allowed_after_randomization(default_account, accounts):
+    contract = deploy(default_account)
+    loki_id = create_loki(contract)
+    player = contract.connect(accounts[0])
+    c = commitment(loki_id, accounts[0].address, "red", "nonce-1")
+
+    tx = player.enter_loki(args=[loki_id, c]).transact(
+        value=ENTRY_AMOUNT,
+        transaction_context={"genvm_datetime": BEFORE_CLOSE},
+    )
+    assert tx_execution_succeeded(tx)
+
+    entry_id = contract.entry_ids.call()[-1]
+
+    tx = contract.close_loki(args=[loki_id]).transact(
+        transaction_context={"genvm_datetime": AFTER_CLOSE}
+    )
+    assert tx_execution_succeeded(tx)
+
+    tx = player.reveal_choice(
+        args=[entry_id, "red", "nonce-1"]
+    ).transact(transaction_context={"genvm_datetime": AFTER_CLOSE})
+    assert tx_execution_succeeded(tx)
+
+    entry = contract.get_entry(args=[entry_id]).call()
+    assert entry["revealed"] is True
+    assert entry["choice"] == "red"
+
+
+def test_settlement_applies_one_percent_platform_fee(default_account, accounts):
+    contract = deploy(default_account)
+    loki_id = create_loki(contract, choices=["red", "blue"])
+
+    player = contract.connect(accounts[0])
+    c = commitment(loki_id, accounts[0].address, "red", "nonce-1")
+
+    tx = player.enter_loki(args=[loki_id, c]).transact(
+        value=ENTRY_AMOUNT,
+        transaction_context={"genvm_datetime": BEFORE_CLOSE},
+    )
+    assert tx_execution_succeeded(tx)
+
+    entry_id = contract.entry_ids.call()[-1]
+
+    tx = contract.close_loki(args=[loki_id]).transact(
+        transaction_context={"genvm_datetime": AFTER_CLOSE}
+    )
+    assert tx_execution_succeeded(tx)
+
+    tx = player.reveal_choice(
+        args=[entry_id, "red", "nonce-1"]
+    ).transact(transaction_context={"genvm_datetime": AFTER_CLOSE})
+    assert tx_execution_succeeded(tx)
+
+    tx = contract.settle_loki(args=[loki_id]).transact(
+        transaction_context={"genvm_datetime": AFTER_CLOSE}
+    )
+    assert tx_execution_succeeded(tx)
+
+    loki = contract.get_loki(args=[loki_id]).call()
+    assert loki["platform_fee"] == "0"
+    assert contract.get_platform_fees().call() == 0
+
+
+def test_settlement_with_two_entries_never_weights_randomness_by_participation(
+    default_account, accounts
+):
+    contract = deploy(default_account)
+    loki_id = create_loki(contract, choices=["red", "blue"])
+
+    player_a = contract.connect(accounts[0])
+    player_b = contract.connect(accounts[1])
+
+    c_a = commitment(loki_id, accounts[0].address, "red", "nonce-a")
+    c_b = commitment(loki_id, accounts[1].address, "blue", "nonce-b")
+
+    tx = player_a.enter_loki(args=[loki_id, c_a]).transact(
+        value=ENTRY_AMOUNT,
+        transaction_context={"genvm_datetime": BEFORE_CLOSE},
+    )
+    assert tx_execution_succeeded(tx)
+
+    tx = player_b.enter_loki(args=[loki_id, c_b]).transact(
+        value=ENTRY_AMOUNT,
+        transaction_context={"genvm_datetime": BEFORE_CLOSE},
+    )
+    assert tx_execution_succeeded(tx)
+
+    tx = contract.close_loki(args=[loki_id]).transact(
+        transaction_context={"genvm_datetime": AFTER_CLOSE}
+    )
+    assert tx_execution_succeeded(tx)
+
+    random_choice = contract.get_loki(args=[loki_id]).call()["random_choice"]
+    assert random_choice in ["red", "blue"]
