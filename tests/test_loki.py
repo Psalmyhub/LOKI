@@ -44,6 +44,7 @@ def test_create_loki_stores_immutable_rules():
     assert loki["choices"] == ["orange", "pink", "red", "blue", "green"]
     assert loki["entry_amount"] == "10"
     assert loki["status"] == "OPEN"
+    assert loki["randomness_input_hash"] == ""
 
 
 def test_duplicate_choices_rejected():
@@ -73,6 +74,31 @@ def test_randomness_cannot_be_caller_supplied():
             2_000_000_000,
         ]
     )
+
+    with pytest.raises(Exception):
+        contract.resolve_randomness(args=[loki_id])
+
+
+def test_close_freezes_randomness_input_and_excludes_finalizer():
+    contract = direct_deploy("contracts/loki.py")
+
+    loki_id = contract.create_loki(
+        args=[
+            "Frozen draw",
+            "color",
+            ["red", "blue"],
+            10,
+            1,
+        ]
+    )
+
+    # Direct-test runtime starts at a fixed clock; close_at=1 is immediately
+    # reachable in the test VM.
+    contract.close_loki(args=[loki_id])
+    loki = contract.get_loki(args=[loki_id])
+
+    assert loki["status"] == "CLOSED"
+    assert len(loki["randomness_input_hash"]) == 64
 
     with pytest.raises(Exception):
         contract.resolve_randomness(args=[loki_id])
