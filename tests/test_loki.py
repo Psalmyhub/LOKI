@@ -1,10 +1,12 @@
 import hashlib
 import json
+from pprint import pprint
 
 import pytest
 
 from gltest import get_contract_factory
 from gltest.assertions import tx_execution_failed, tx_execution_succeeded
+from gltest.types import TransactionHashVariant, TransactionStatus
 
 
 BEFORE_CLOSE = "2030-01-01T00:00:00Z"
@@ -143,11 +145,23 @@ def test_close_uses_transaction_bound_randomness_and_freezes_input(default_accou
     loki_id = create_loki(contract)
 
     tx = contract.close_loki(args=[loki_id]).transact(
-        transaction_context={"genvm_datetime": AFTER_CLOSE}
+        wait_transaction_status=TransactionStatus.FINALIZED,
+        wait_interval=3000,
+        wait_retries=60,
+        transaction_context={"genvm_datetime": AFTER_CLOSE},
     )
+
+    print("\n===== CLOSE TRANSACTION (FINALIZED) =====")
+    pprint(tx)
+
     assert tx_execution_succeeded(tx)
 
-    loki = contract.get_loki(args=[loki_id]).call()
+    loki = contract.get_loki(args=[loki_id]).call(
+        transaction_hash_variant=TransactionHashVariant.LATEST_FINAL,
+    )
+
+    print("\n===== FINAL LOKI STATE =====")
+    pprint(loki)
 
     assert loki["status"] == "RANDOMIZED"
     assert loki["randomness_verified"] is True
