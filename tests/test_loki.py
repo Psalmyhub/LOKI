@@ -194,6 +194,7 @@ def test_close_uses_transaction_bound_randomness_and_freezes_input(default_accou
     assert len(loki["randomness_entropy"]) == 64
     assert len(loki["randomness_consensus"]) == 64
     assert loki["random_choice"] in loki["choices"]
+    assert loki["randomness_entropy"] != "0" * 64
 
     tx = contract.resolve_randomness(args=[loki_id]).transact(
         transaction_context={"genvm_datetime": AFTER_CLOSE}
