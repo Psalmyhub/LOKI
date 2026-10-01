@@ -36,7 +36,7 @@ export function createWriteClient(
 
 export async function waitForLokiTransaction(
   client: LokiWriteClient,
-  hash: `0x${string}`,
+  hash: Parameters<LokiWriteClient["waitForTransactionReceipt"]>[0]["hash"],
 ) {
   const receipt = await client.waitForTransactionReceipt({
     hash,
