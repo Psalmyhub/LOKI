@@ -267,7 +267,7 @@ class Loki(gl.Contract):
         else:
             raise gl.vm.UserError("[EXPECTED] invalid protocol transaction random seed")
 
-        if len(seed) != 32 or seed == b"\\x00" * 32:
+        if len(seed) != 32 or seed == b"\x00" * 32:
             raise gl.vm.UserError("[EXPECTED] protocol transaction random seed is unavailable")
         return seed
 
