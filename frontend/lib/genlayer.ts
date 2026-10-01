@@ -43,7 +43,6 @@ export async function waitForLokiTransaction(
     status: TransactionStatus.FINALIZED,
     interval: 3000,
     retries: 120,
-    fullTransaction: false,
   });
 
   if (
