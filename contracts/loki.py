@@ -243,7 +243,7 @@ class Loki(gl.Contract):
             })
 
         payload = {
-            "version": "loki-random-v1",
+            "version": "loki-random-v3",
             "loki_id": loki["id"],
             "choices": loki["choices"],
             "entry_amount": loki["entry_amount"],
@@ -291,11 +291,11 @@ class Loki(gl.Contract):
 
         def leader_fn() -> dict:
             seed = self._protocol_transaction_seed()
-            material = b"LOKI/randomness/v2|" + seed + bytes.fromhex(randomness_input_hash)
+            material = b"LOKI/randomness/v3|" + seed + bytes.fromhex(randomness_input_hash)
             digest = hashlib.sha256(material).hexdigest()
             index = int(digest, 16) % len(choices)
             return {
-                "version": "loki-random-v2",
+                "version": "loki-random-v3",
                 "input_hash": randomness_input_hash,
                 "seed_hash": hashlib.sha256(seed).hexdigest(),
                 "digest": digest,
@@ -310,7 +310,7 @@ class Loki(gl.Contract):
             proposed = leader_result.calldata
             if not isinstance(proposed, dict):
                 return False
-            if proposed.get("version") != "loki-random-v2":
+            if proposed.get("version") != "loki-random-v3":
                 return False
             if proposed.get("input_hash") != randomness_input_hash:
                 return False
@@ -320,7 +320,7 @@ class Loki(gl.Contract):
             except Exception:
                 return False
 
-            material = b"LOKI/randomness/v2|" + seed + bytes.fromhex(randomness_input_hash)
+            material = b"LOKI/randomness/v3|" + seed + bytes.fromhex(randomness_input_hash)
             digest = hashlib.sha256(material).hexdigest()
             index = int(digest, 16) % len(choices)
 
