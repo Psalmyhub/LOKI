@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { createClient, createAccount } from "genlayer-js";
+import { createWriteClient, readClient } from "../lib/genlayer";
 
 const CONTRACT =
   process.env.NEXT_PUBLIC_LOKI_CONTRACT_ADDRESS ??
@@ -31,11 +31,8 @@ type Loki = {
   entry_ids?: string[];
 };
 
-const rpc = "https://studio.genlayer.com/api";
-const chainId = 61999;
-
 export default function Home() {
-  const [account, setAccount] = useState<any>(null);
+  const [account, setAccount] = useState<string | null>(null);
   const [client, setClient] = useState<any>(null);
   const [lokiId, setLokiId] = useState("loki-1");
   const [loki, setLoki] = useState<Loki | null>(null);
@@ -61,32 +58,23 @@ export default function Home() {
       return;
     }
 
-    const provider = {
-      request: (args: { method: string; params?: unknown[] }) =>
-        window.ethereum.request(args),
-    };
+    const ethereum = window.ethereum;
 
-    const addresses = (await provider.request({
+    const addresses = (await ethereum.request({
       method: "eth_requestAccounts",
     })) as string[];
 
-    const acc = createAccount(addresses[0], provider as any);
-    const c = createClient({
-      network: "studionet",
-      endpoint: rpc,
-      chainId,
-      account: acc,
-    });
+    const address = addresses[0] as `0x${string}`;
+    const c = createWriteClient(address, ethereum);
 
-    setAccount(acc);
+    setAccount(address);
     setClient(c);
-    setStatus(`Connected: ${addresses[0]}\nStudionet: ${chainId}`);
+    setStatus(`Connected: ${address}\nStudionet: 61999`);
   }
 
   async function readLoki() {
-    if (!client) return setStatus("Connect wallet first.");
     try {
-      const result = await client.readContract({
+      const result = await readClient.readContract({
         address: CONTRACT,
         functionName: "get_loki",
         args: [lokiId],
