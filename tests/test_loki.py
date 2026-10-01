@@ -109,6 +109,31 @@ def test_exact_payment_and_one_wallet_one_entry(default_account, accounts):
     assert tx_execution_failed(tx)
 
 
+def test_invalid_commitment_rejected(default_account, accounts):
+    contract = deploy(default_account)
+    loki_id = create_loki(contract)
+    player = contract.connect(accounts[0])
+
+    tx = player.enter_loki(args=[loki_id, "z" * 64]).transact(
+        value=ENTRY_AMOUNT,
+        transaction_context={"genvm_datetime": BEFORE_CLOSE},
+    )
+    assert tx_execution_failed(tx)
+
+
+def test_enter_after_closing_time_rejected(default_account, accounts):
+    contract = deploy(default_account)
+    loki_id = create_loki(contract)
+    player = contract.connect(accounts[0])
+    c = commitment(loki_id, accounts[0].address, "red", "nonce-1")
+
+    tx = player.enter_loki(args=[loki_id, c]).transact(
+        value=ENTRY_AMOUNT,
+        transaction_context={"genvm_datetime": AFTER_CLOSE},
+    )
+    assert tx_execution_failed(tx)
+
+
 def test_wrong_payment_rejected(default_account, accounts):
     contract = deploy(default_account)
     loki_id = create_loki(contract)
