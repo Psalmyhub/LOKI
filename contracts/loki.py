@@ -249,6 +249,28 @@ class Loki(gl.Contract):
         }
         return _digest(_json(payload))
 
+    def _protocol_transaction_seed(self) -> bytes:
+        raw = gl.message_raw.get("random_seed")
+        if raw is None:
+            raise gl.vm.UserError("[EXPECTED] protocol transaction random seed is unavailable")
+
+        if isinstance(raw, str):
+            seed_hex = raw[2:] if raw.startswith("0x") else raw
+            if len(seed_hex) != 64:
+                raise gl.vm.UserError("[EXPECTED] invalid protocol transaction random seed")
+            try:
+                seed = bytes.fromhex(seed_hex)
+            except ValueError:
+                raise gl.vm.UserError("[EXPECTED] invalid protocol transaction random seed")
+        elif isinstance(raw, (bytes, bytearray)):
+            seed = bytes(raw)
+        else:
+            raise gl.vm.UserError("[EXPECTED] invalid protocol transaction random seed")
+
+        if len(seed) != 32 or seed == b"\\x00" * 32:
+            raise gl.vm.UserError("[EXPECTED] protocol transaction random seed is unavailable")
+        return seed
+
     @gl.public.write
     def close_loki(self, loki_id: str) -> None:
         loki = self._loki(loki_id)
@@ -263,30 +285,13 @@ class Loki(gl.Contract):
         randomness_input_hash = loki["randomness_input_hash"]
         choices = list(loki["choices"])
 
-        def get_transaction_seed() -> bytes:
-            import os
-
-            stream = os.fdopen(0, "rb", buffering=0, closefd=False)
-            stream.seek(0)
-            digest = hashlib.sha256()
-            while True:
-                chunk = stream.read(8192)
-                if not chunk:
-                    return digest.digest()
-                digest.update(chunk)
-
         def leader_fn() -> dict:
-            seed = get_transaction_seed()
-            material = (
-                b"LOKI/randomness/v1|"
-                + randomness_input_hash.encode("utf-8")
-                + b"|"
-                + seed
-            )
+            seed = self._protocol_transaction_seed()
+            material = b"LOKI/randomness/v2|" + seed + bytes.fromhex(randomness_input_hash)
             digest = hashlib.sha256(material).hexdigest()
             index = int(digest, 16) % len(choices)
             return {
-                "version": "loki-random-v1",
+                "version": "loki-random-v2",
                 "input_hash": randomness_input_hash,
                 "seed_hash": hashlib.sha256(seed).hexdigest(),
                 "digest": digest,
@@ -301,18 +306,17 @@ class Loki(gl.Contract):
             proposed = leader_result.calldata
             if not isinstance(proposed, dict):
                 return False
-            if proposed.get("version") != "loki-random-v1":
+            if proposed.get("version") != "loki-random-v2":
                 return False
             if proposed.get("input_hash") != randomness_input_hash:
                 return False
 
-            seed = get_transaction_seed()
-            material = (
-                b"LOKI/randomness/v1|"
-                + randomness_input_hash.encode("utf-8")
-                + b"|"
-                + seed
-            )
+            try:
+                seed = self._protocol_transaction_seed()
+            except Exception:
+                return False
+
+            material = b"LOKI/randomness/v2|" + seed + bytes.fromhex(randomness_input_hash)
             digest = hashlib.sha256(material).hexdigest()
             index = int(digest, 16) % len(choices)
 
@@ -323,7 +327,7 @@ class Loki(gl.Contract):
                 and proposed.get("choice") == choices[index]
             )
 
-        result = gl.vm.run_nondet(leader_fn, validator_fn)
+        result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
         if not isinstance(result, dict):
             raise gl.vm.UserError("[EXPECTED] randomness consensus failed")
