@@ -1,11 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { createWriteClient, readClient } from "../lib/genlayer";
+import {
+  LOKI_CONTRACT_ADDRESS,
+  createWriteClient,
+  readClient,
+} from "../lib/genlayer";
 
-const CONTRACT =
-  process.env.NEXT_PUBLIC_LOKI_CONTRACT_ADDRESS ??
-  "0x5F14155aE0779b9a82D599e5E660483714A332b5";
+const CONTRACT = LOKI_CONTRACT_ADDRESS;
 
 type Loki = {
   id: string;
@@ -59,7 +61,6 @@ export default function Home() {
     }
 
     const ethereum = window.ethereum;
-
     const addresses = (await ethereum.request({
       method: "eth_requestAccounts",
     })) as string[];
