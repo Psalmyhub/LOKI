@@ -168,6 +168,10 @@ class Loki(gl.Contract):
 
         if not isinstance(choice_commitment, str) or len(choice_commitment) != 64:
             raise gl.vm.UserError("[EXPECTED] commitment must be a SHA-256 digest")
+        try:
+            bytes.fromhex(choice_commitment)
+        except ValueError:
+            raise gl.vm.UserError("[EXPECTED] commitment must be hexadecimal")
 
         entry_id = "entry-" + str(int(self.next_entry_id))
         self.next_entry_id = u256(int(self.next_entry_id) + 1)
