@@ -40,7 +40,6 @@ export const LOKI_METHODS = {
   enter_loki: ["loki_id", "choice_commitment"],
   reveal_choice: ["entry_id", "choice", "nonce"],
   close_loki: ["loki_id"],
-  resolve_randomness: ["loki_id"],
   settle_loki: ["loki_id"],
   claim: [],
   get_loki: ["loki_id"],

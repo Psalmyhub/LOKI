@@ -57,3 +57,65 @@ export async function waitForLokiTransaction(
 
   return receipt;
 }
+export function extractContractReturnValue(
+  receipt: unknown,
+): string | null {
+  const tx = receipt as {
+    consensus_data?: {
+      leader_receipt?: Array<{
+        result?: unknown;
+      }>;
+    };
+  };
+
+  const leaderResult = tx.consensus_data?.leader_receipt?.[0]?.result;
+
+  if (!leaderResult) {
+    return null;
+  }
+
+  if (typeof leaderResult === "string") {
+    try {
+      const parsed = JSON.parse(leaderResult);
+      return typeof parsed === "string" ? parsed : null;
+    } catch {
+      return leaderResult;
+    }
+  }
+
+  if (
+    typeof leaderResult === "object" &&
+    leaderResult !== null
+  ) {
+    const result = leaderResult as {
+      status?: unknown;
+      payload?: unknown;
+    };
+
+    if (result.status !== "return") {
+      return null;
+    }
+
+    if (
+      typeof result.payload === "object" &&
+      result.payload !== null
+    ) {
+      const payload = result.payload as {
+        readable?: unknown;
+      };
+
+      if (typeof payload.readable === "string") {
+        try {
+          const parsed = JSON.parse(payload.readable);
+          return typeof parsed === "string"
+            ? parsed
+            : payload.readable;
+        } catch {
+          return payload.readable;
+        }
+      }
+    }
+  }
+
+  return null;
+}

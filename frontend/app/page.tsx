@@ -1,243 +1,504 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { LOKI_CONTRACT_ADDRESS, readClient } from "../lib/genlayer";
 import {
-  LOKI_CONTRACT_ADDRESS,
-  createWriteClient,
-  readClient,
-} from "../lib/genlayer";
+  enterLoki,
+  getEntry,
+  getLoki,
+  revealChoice,
+  claim,
+  type LokiEntry,
+  type LokiState,
+} from "../lib/loki";
+import { makeChoiceCommitment } from "../lib/commitment";
+import { createWriteClient } from "../lib/genlayer";
 
 const CONTRACT = LOKI_CONTRACT_ADDRESS;
 
-type Loki = {
-  id: string;
-  publisher: string;
-  title: string;
-  category: string;
-  choices: string[];
-  entry_amount: string;
-  closes_at: string;
-  status: string;
-  participant_count: string;
-  total_pool: string;
-  random_choice: string;
-  randomness_verified: boolean;
-  randomness_input_hash: string;
-  randomness_entropy: string;
-  randomness_consensus: string;
-  winner_count: string;
-  platform_fee: string;
-  prize_pool: string;
-  refund_pool: string;
-  settled: boolean;
-  entry_ids?: string[];
+type EthereumProvider = {
+  request(args: { method: string; params?: unknown[] }): Promise<any>;
+};
+
+const formatRemaining = (closesAt: string) => {
+  const seconds = Math.max(
+    0,
+    Math.floor(Number(closesAt) - Date.now() / 1000),
+  );
+
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m ${secs}s`;
+  return `${minutes}m ${secs}s`;
 };
 
 export default function Home() {
+  const [provider, setProvider] = useState<EthereumProvider | null>(null);
   const [account, setAccount] = useState<string | null>(null);
-  const [client, setClient] = useState<any>(null);
   const [lokiId, setLokiId] = useState("loki-1");
-  const [loki, setLoki] = useState<Loki | null>(null);
-  const [title, setTitle] = useState("LOKI Studio Randomness Test");
-  const [category, setCategory] = useState("Randomness");
-  const [choices, setChoices] = useState("RED\nBLUE");
-  const [entryAmount, setEntryAmount] = useState("1");
-  const [closesAt, setClosesAt] = useState("");
-  const [commitment, setCommitment] = useState("");
-  const [entryId, setEntryId] = useState("");
-  const [revealChoice, setRevealChoice] = useState("RED");
+  const [loki, setLoki] = useState<LokiState | null>(null);
+  const [entry, setEntry] = useState<LokiEntry | null>(null);
+  const [selectedChoice, setSelectedChoice] = useState("");
   const [nonce, setNonce] = useState("");
-  const [status, setStatus] = useState("Disconnected.");
+  const [entryId, setEntryId] = useState("");
+  const [status, setStatus] = useState("Connect your wallet to participate.");
+  const [busy, setBusy] = useState(false);
+  const [remaining, setRemaining] = useState("");
 
-  const choiceList = useMemo(
-    () => choices.split("\n").map((x) => x.trim()).filter(Boolean),
-    [choices],
-  );
+  const isClosed = useMemo(() => {
+    if (!loki) return false;
+    return Date.now() / 1000 >= Number(loki.closes_at);
+  }, [loki, remaining]);
 
   async function connect() {
-    if (!window.ethereum) {
-      setStatus("No injected wallet found. Install/enable your wallet.");
+    const ethereum = window.ethereum;
+
+    if (!ethereum) {
+      setStatus("No injected wallet found. Install or enable your wallet.");
       return;
     }
 
-    const ethereum = window.ethereum;
-    const addresses = (await ethereum.request({
-      method: "eth_requestAccounts",
-    })) as string[];
-
-    const address = addresses[0] as `0x${string}`;
-    const c = createWriteClient(address, ethereum);
-
-    setAccount(address);
-    setClient(c);
-    setStatus(`Connected: ${address}\nStudionet: 61999`);
-  }
-
-  async function readLoki() {
     try {
-      const result = await readClient.readContract({
-        address: CONTRACT,
-        functionName: "get_loki",
-        args: [lokiId],
-      });
-      setLoki(result as Loki);
-      setStatus("Read completed.");
+      const addresses = (await ethereum.request({
+        method: "eth_requestAccounts",
+      })) as string[];
+
+      if (!addresses[0]) throw new Error("No wallet account returned.");
+
+      setProvider(ethereum);
+      setAccount(addresses[0]);
+      setStatus(`Connected: ${addresses[0]}`);
     } catch (error) {
       setStatus(String(error));
     }
   }
 
-  async function send(functionName: string, args: unknown[], value?: string) {
-    if (!client) throw new Error("Connect wallet first.");
-
-    const tx = await client.writeContract({
-      address: CONTRACT,
-      functionName,
-      args,
-      value,
-    });
-
-    setStatus(`${functionName} submitted: ${tx}`);
-    return tx;
-  }
-
-  async function createLoki() {
-    if (!closesAt) return setStatus("Enter a future Unix timestamp.");
+  async function refresh() {
     try {
-      const id = await send("create_loki", [
-        title,
-        category,
-        choiceList,
-        BigInt(entryAmount),
-        BigInt(closesAt),
-      ]);
-      setLokiId(String(id));
-      setStatus(`create_loki result: ${id}`);
+      const result = await getLoki(lokiId);
+      setLoki(result);
+
+      if (result.choices.length > 0 && !selectedChoice) {
+        setSelectedChoice(result.choices[0]);
+      }
+
+      setStatus(`Loaded ${lokiId}.`);
     } catch (error) {
-      setStatus(String(error));
+      setLoki(null);
+      setStatus(`Unable to load ${lokiId}: ${String(error)}`);
     }
   }
 
-  async function enter() {
-    try {
-      const id = await send("enter_loki", [lokiId, commitment], entryAmount);
-      setEntryId(String(id));
-    } catch (error) {
-      setStatus(String(error));
-    }
-  }
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lokiId]);
 
-  async function close() {
+  useEffect(() => {
+    if (!loki) return;
+
+    const update = () => {
+      setRemaining(formatRemaining(loki.closes_at));
+    };
+
+    update();
+    const timer = window.setInterval(update, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [loki]);
+
+  async function participate() {
+    if (!provider || !account) {
+      setStatus("Connect your wallet first.");
+      return;
+    }
+
+    if (!loki) {
+      setStatus("Load a LOKI first.");
+      return;
+    }
+
+    if (!selectedChoice) {
+      setStatus("Select an option.");
+      return;
+    }
+
+    if (Date.now() / 1000 >= Number(loki.closes_at)) {
+      setStatus("This LOKI has closed.");
+      return;
+    }
+
+    setBusy(true);
+
     try {
-      await send("close_loki", [lokiId]);
-      await readLoki();
+      const writeClient = createWriteClient(
+        account as `0x${string}`,
+        provider,
+      );
+
+      const generatedNonce =
+        nonce ||
+        `${crypto.randomUUID()}-${crypto.randomUUID()}`;
+
+      setNonce(generatedNonce);
+
+      const commitment = await makeChoiceCommitment(
+        loki.id,
+        account,
+        selectedChoice,
+        generatedNonce,
+      );
+
+      setStatus("Submitting entry...");
+
+      const receipt = await enterLoki(
+        writeClient,
+        loki.id,
+        commitment,
+        BigInt(loki.entry_amount),
+      );
+
+      const result = receipt?.hash || receipt;
+      setStatus(`Entry submitted: ${String(result)}`);
+
+      await refresh();
     } catch (error) {
       setStatus(String(error));
+    } finally {
+      setBusy(false);
     }
   }
 
   async function reveal() {
+    if (!provider || !account) {
+      setStatus("Connect your wallet first.");
+      return;
+    }
+
+    if (!entryId) {
+      setStatus("Enter your entry ID.");
+      return;
+    }
+
+    if (!selectedChoice || !nonce) {
+      setStatus("Choice and nonce are required.");
+      return;
+    }
+
+    setBusy(true);
+
     try {
-      await send("reveal_choice", [entryId, revealChoice, nonce]);
+      const writeClient = createWriteClient(
+        account as `0x${string}`,
+        provider,
+      );
+
+      const receipt = await revealChoice(
+        writeClient,
+        entryId,
+        selectedChoice,
+        nonce,
+      );
+
+      setStatus(
+        `Reveal submitted: ${String(receipt?.hash || receipt)}`,
+      );
+
+      await loadEntry();
     } catch (error) {
       setStatus(String(error));
+    } finally {
+      setBusy(false);
     }
   }
 
-  async function settle() {
+  async function loadEntry() {
+    if (!entryId) return;
+
     try {
-      await send("settle_loki", [lokiId]);
-      await readLoki();
-    } catch (error) {
-      setStatus(String(error));
+      const result = await getEntry(entryId);
+      setEntry(result);
+    } catch {
+      setEntry(null);
     }
   }
 
-  async function claim() {
+  async function doClaim() {
+    if (!provider || !account) {
+      setStatus("Connect your wallet first.");
+      return;
+    }
+
+    setBusy(true);
+
     try {
-      await send("claim", []);
+      const writeClient = createWriteClient(
+        account as `0x${string}`,
+        provider,
+      );
+
+      const receipt = await claim(writeClient);
+
+      setStatus(
+        `Claim submitted: ${String(receipt?.hash || receipt)}`,
+      );
     } catch (error) {
       setStatus(String(error));
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
     <main>
-      <header>
+      <header className="site-header">
         <div>
-          <h1>LOKI</h1>
+          <div className="brand">LOKI</div>
           <p className="muted">
-            GenLayer peer-to-peer prediction protocol · Studionet
+            Permissionless prediction markets powered by GenLayer.
           </p>
-          <p className="mono muted">{CONTRACT}</p>
         </div>
-        <button onClick={connect}>{account ? "Connected" : "Connect wallet"}</button>
+
+        <div className="header-actions">
+          {account && (
+            <a className="secondary-link" href="/admin">
+              Publisher dashboard
+            </a>
+          )}
+
+          <button onClick={connect}>
+            {account ? "Wallet connected" : "Connect wallet"}
+          </button>
+        </div>
       </header>
 
-      <div className="grid">
-        <section className="card">
-          <h2>Create LOKI</h2>
-          <div className="stack">
-            <label>Title<input value={title} onChange={(e) => setTitle(e.target.value)} /></label>
-            <label>Category<input value={category} onChange={(e) => setCategory(e.target.value)} /></label>
-            <label>Choices (one per line)<textarea value={choices} onChange={(e) => setChoices(e.target.value)} /></label>
-            <label>Entry amount (native units)<input value={entryAmount} onChange={(e) => setEntryAmount(e.target.value)} /></label>
-            <label>Closes at (Unix timestamp)<input value={closesAt} onChange={(e) => setClosesAt(e.target.value)} /></label>
-            <button onClick={createLoki}>Create</button>
-          </div>
-        </section>
+      <section className="hero">
+        <p className="eyebrow">PLAYER</p>
+        <h1>Choose your outcome.</h1>
+        <p className="hero-copy">
+          Enter an open LOKI, commit your choice, reveal it after closing,
+          and follow the verified result.
+        </p>
+      </section>
 
-        <section className="card">
-          <h2>LOKI state</h2>
-          <div className="stack">
-            <label>LOKI ID<input value={lokiId} onChange={(e) => setLokiId(e.target.value)} /></label>
-            <div className="actions">
-              <button className="secondary" onClick={readLoki}>Refresh</button>
-              <button onClick={close}>Close + randomize</button>
-              <button className="secondary" onClick={settle}>Settle</button>
-              <button className="secondary" onClick={claim}>Claim</button>
+      <section className="card">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">LOKI</p>
+            <h2>Open a LOKI</h2>
+          </div>
+
+          <button
+            className="secondary"
+            onClick={refresh}
+            disabled={busy}
+          >
+            Refresh
+          </button>
+        </div>
+
+        <div className="lookup-row">
+          <input
+            value={lokiId}
+            onChange={(event) => setLokiId(event.target.value)}
+            placeholder="loki-1"
+          />
+        </div>
+      </section>
+
+      {loki && (
+        <>
+          <section className="card loki-card">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">{loki.category}</p>
+                <h2>{loki.title}</h2>
+              </div>
+
+              <span className={`badge ${loki.status.toLowerCase()}`}>
+                {loki.status}
+              </span>
             </div>
-            {loki && <pre>{JSON.stringify(loki, null, 2)}</pre>}
-          </div>
-        </section>
 
-        <section className="card">
-          <h2>Enter</h2>
-          <div className="stack">
-            <label>SHA-256 commitment<input value={commitment} onChange={(e) => setCommitment(e.target.value)} /></label>
-            <button onClick={enter}>Enter LOKI</button>
-            <p className="muted mono">Entry result: {entryId || "—"}</p>
-          </div>
-        </section>
+            <div className="stats">
+              <div>
+                <span>Participants</span>
+                <strong>{loki.participant_count}</strong>
+              </div>
 
-        <section className="card">
-          <h2>Reveal</h2>
-          <div className="stack">
-            <label>Entry ID<input value={entryId} onChange={(e) => setEntryId(e.target.value)} /></label>
-            <label>Choice<input value={revealChoice} onChange={(e) => setRevealChoice(e.target.value)} /></label>
-            <label>Nonce<input value={nonce} onChange={(e) => setNonce(e.target.value)} /></label>
-            <button onClick={reveal}>Reveal choice</button>
-          </div>
-        </section>
+              <div>
+                <span>Entry</span>
+                <strong>{loki.entry_amount}</strong>
+              </div>
 
-        <section className="card full">
-          <h2>Status</h2>
-          <div className="status">{status}</div>
-          <p className="muted">
-            Randomness is never generated by this frontend. The frontend only
-            invokes the deployed contract; the contract performs its own
-            randomness/consensus operation.
-          </p>
-        </section>
-      </div>
+              <div>
+                <span>Closing</span>
+                <strong>
+                  {loki.status === "OPEN" && !isClosed
+                    ? `Closes in ${remaining}`
+                    : loki.status === "RANDOMIZED"
+                      ? "Randomized"
+                      : "Closed — random selection in progress"}
+                </strong>
+              </div>
+            </div>
+
+            <div className="choices">
+              {loki.choices.map((choice) => (
+                <button
+                  key={choice}
+                  className={
+                    selectedChoice === choice ? "choice selected" : "choice"
+                  }
+                  disabled={isClosed || loki.status !== "OPEN" || busy}
+                  onClick={() => setSelectedChoice(choice)}
+                >
+                  {choice}
+                </button>
+              ))}
+            </div>
+
+            <div className="actions">
+              <button
+                onClick={participate}
+                disabled={
+                  busy ||
+                  !account ||
+                  loki.status !== "OPEN" ||
+                  isClosed
+                }
+              >
+                Enter LOKI
+              </button>
+            </div>
+          </section>
+
+          {loki.status === "RANDOMIZED" && (
+            <section className="card result-card">
+              <p className="eyebrow">VERIFIED RESULT</p>
+              <h2>{loki.random_choice || "Awaiting result"}</h2>
+
+              <div className="verification">
+                <div>
+                  <span>Randomness</span>
+                  <strong>
+                    {loki.randomness_verified ? "Verified" : "Pending"}
+                  </strong>
+                </div>
+
+                <div>
+                  <span>Consensus digest</span>
+                  <code>{loki.randomness_consensus || "—"}</code>
+                </div>
+              </div>
+            </section>
+          )}
+
+          <section className="card">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">REVEAL</p>
+                <h2>Reveal your committed choice</h2>
+              </div>
+            </div>
+
+            <div className="form-grid">
+              <label>
+                Entry ID
+                <input
+                  value={entryId}
+                  onChange={(event) => setEntryId(event.target.value)}
+                  placeholder="Your entry ID"
+                />
+              </label>
+
+              <label>
+                Nonce
+                <input
+                  value={nonce}
+                  onChange={(event) => setNonce(event.target.value)}
+                  placeholder="The nonce used during entry"
+                />
+              </label>
+            </div>
+
+            <div className="actions">
+              <button
+                onClick={reveal}
+                disabled={busy || !account || !entryId}
+              >
+                Reveal choice
+              </button>
+
+              <button
+                className="secondary"
+                onClick={loadEntry}
+                disabled={!entryId}
+              >
+                Check entry
+              </button>
+            </div>
+
+            {entry && (
+              <div className="entry-result">
+                <p>
+                  <strong>Entry:</strong> {entry.id}
+                </p>
+                <p>
+                  <strong>Revealed:</strong>{" "}
+                  {entry.revealed ? "Yes" : "No"}
+                </p>
+                <p>
+                  <strong>Winner:</strong>{" "}
+                  {entry.is_winner ? "Yes" : "No"}
+                </p>
+              </div>
+            )}
+          </section>
+
+          <section className="card">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">CLAIM</p>
+                <h2>Claim settlement</h2>
+              </div>
+            </div>
+
+            <button
+              onClick={doClaim}
+              disabled={busy || !account}
+            >
+              Claim
+            </button>
+          </section>
+        </>
+      )}
+
+      <section className="card status-card">
+        <p className="eyebrow">SYSTEM STATUS</p>
+        <div className="status">{status}</div>
+        <p className="muted">
+          LOKI randomness is never generated by the frontend. The frontend
+          only submits contract transactions. Randomness is resolved by the
+          deployed LOKI contract using the protocol transaction seed and
+          GenLayer consensus.
+        </p>
+      </section>
+
+      <footer>
+        <span>Studionet · Chain 61999</span>
+        <code>{CONTRACT}</code>
+      </footer>
     </main>
   );
 }
 
 declare global {
   interface Window {
-    ethereum?: {
-      request(args: { method: string; params?: unknown[] }): Promise<any>;
-    };
+    ethereum?: EthereumProvider;
   }
 }
