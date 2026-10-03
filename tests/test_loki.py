@@ -201,7 +201,7 @@ def test_full_matching_flow_winners_are_every_matching_choice(default_account, a
     assert int(loki["platform_fee"]) == 4
 
 
-def test_no_winner_does_not_refund_players(default_account, accounts):
+def test_no_winner_distributes_net_pool_to_all_participants(default_account, accounts):
     contract = deploy(default_account)
     loki_id = create_loki(contract, choices=["RED", "BLUE"])
 
@@ -215,7 +215,7 @@ def test_no_winner_does_not_refund_players(default_account, accounts):
 
     loki = contract.get_loki(args=[loki_id]).call()
     if loki["random_choice"] == "BLUE":
-        pytest.skip("Random selection matched the only selected choice")
+        pytest.skip("Random selection matched the selected choice")
 
     tx = contract.settle_loki(args=[loki_id]).transact(
         transaction_context={"genvm_datetime": AFTER_CLOSE}
@@ -224,12 +224,14 @@ def test_no_winner_does_not_refund_players(default_account, accounts):
 
     loki = contract.get_loki(args=[loki_id]).call()
     assert loki["winner_count"] == "0"
+    assert loki["platform_fee"] == "2"
+    assert loki["prize_pool"] == "198"
     assert loki["refund_pool"] == "0"
-    assert loki["unmatched_pool"] == "198"
+    assert loki["unmatched_pool"] == "0"
 
     for index in (1, 2):
         entry = contract.get_entry(args=[f"entry-{index}"]).call()
-        assert entry["settlement"] == "LOSE"
+        assert entry["settlement"] == "NO_WINNER_SHARE"
         assert entry["is_winner"] is False
 
 
