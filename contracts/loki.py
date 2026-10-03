@@ -351,16 +351,30 @@ class Loki(gl.Contract):
 
         loki["platform_fee"] = str(fee)
         loki["winner_count"] = str(len(winners))
-        loki["prize_pool"] = str(distributable if winners else 0)
+        loki["prize_pool"] = str(distributable)
         loki["refund_pool"] = "0"
-        loki["unmatched_pool"] = str(distributable if not winners else 0)
+        loki["unmatched_pool"] = "0"
 
         if winners:
-            share = distributable // len(winners)
-            remainder = distributable - share * len(winners)
+            recipients = winners
+            share = distributable // len(recipients)
+            remainder = distributable - share * len(recipients)
 
-            for index, entry_id in enumerate(winners):
+            for index, entry_id in enumerate(recipients):
                 entry = self._entry(entry_id)
+                amount = share + (remainder if index == 0 else 0)
+                account = Address(entry["player"])
+                current = int(self.claimable[account]) if account in self.claimable else 0
+                self.claimable[account] = u256(current + amount)
+                self._save_entry(entry)
+        else:
+            recipients = list(loki["entry_ids"])
+            share = distributable // len(recipients) if recipients else 0
+            remainder = distributable - share * len(recipients)
+
+            for index, entry_id in enumerate(recipients):
+                entry = self._entry(entry_id)
+                entry["settlement"] = "NO_WINNER_SHARE"
                 amount = share + (remainder if index == 0 else 0)
                 account = Address(entry["player"])
                 current = int(self.claimable[account]) if account in self.claimable else 0
