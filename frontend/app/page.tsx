@@ -6,12 +6,10 @@ import {
   enterLoki,
   getEntry,
   getLoki,
-  revealChoice,
   claim,
   type LokiEntry,
   type LokiState,
 } from "../lib/loki";
-import { makeChoiceCommitment } from "../lib/commitment";
 import { createWriteClient } from "../lib/genlayer";
 
 const CONTRACT = LOKI_CONTRACT_ADDRESS;
@@ -43,8 +41,8 @@ export default function Home() {
   const [loki, setLoki] = useState<LokiState | null>(null);
   const [entry, setEntry] = useState<LokiEntry | null>(null);
   const [selectedChoice, setSelectedChoice] = useState("");
-  const [nonce, setNonce] = useState("");
   const [entryId, setEntryId] = useState("");
+  const [entries, setEntries] = useState<LokiEntry[]>([]);
   const [status, setStatus] = useState("Connect your wallet to participate.");
   const [busy, setBusy] = useState(false);
   const [remaining, setRemaining] = useState("");
@@ -81,6 +79,7 @@ export default function Home() {
     try {
       const result = await getLoki(lokiId);
       setLoki(result);
+      await loadEntries(result);
 
       if (result.choices.length > 0 && !selectedChoice) {
         setSelectedChoice(result.choices[0]);
@@ -112,119 +111,25 @@ export default function Home() {
   }, [loki]);
 
   async function participate() {
-    if (!provider || !account) {
-      setStatus("Connect your wallet first.");
-      return;
-    }
-
-    if (!loki) {
-      setStatus("Load a LOKI first.");
-      return;
-    }
-
-    if (!selectedChoice) {
-      setStatus("Select an option.");
-      return;
-    }
-
-    if (Date.now() / 1000 >= Number(loki.closes_at)) {
-      setStatus("This LOKI has closed.");
-      return;
-    }
-
+    if (!provider || !account) { setStatus("Connect your wallet first."); return; }
+    if (!loki) { setStatus("Load a LOKI first."); return; }
+    if (!selectedChoice) { setStatus("Select an option."); return; }
+    if (Date.now() / 1000 >= Number(loki.closes_at)) { setStatus("This LOKI has closed."); return; }
     setBusy(true);
-
     try {
-      const writeClient = createWriteClient(
-        account as `0x${string}`,
-        provider,
-      );
-
-      const generatedNonce =
-        nonce ||
-        `${crypto.randomUUID()}-${crypto.randomUUID()}`;
-
-      setNonce(generatedNonce);
-
-      const commitment = await makeChoiceCommitment(
-        loki.id,
-        account,
-        selectedChoice,
-        generatedNonce,
-      );
-
-      setStatus("Submitting entry...");
-
-      const receipt = await enterLoki(
-        writeClient,
-        loki.id,
-        commitment,
-        BigInt(loki.entry_amount),
-      );
-
-      const result = receipt?.hash || receipt;
-      setStatus(`Entry submitted: ${String(result)}`);
-
+      const writeClient = createWriteClient(account as `0x${string}`, provider);
+      setStatus(`Submitting entry for ${selectedChoice}...`);
+      const receipt = await enterLoki(writeClient, loki.id, selectedChoice, BigInt(loki.entry_amount));
+      setStatus(`Entry submitted: ${String(receipt?.hash || receipt)}`);
       await refresh();
-    } catch (error) {
-      setStatus(String(error));
-    } finally {
-      setBusy(false);
-    }
+    } catch (error) { setStatus(String(error)); }
+    finally { setBusy(false); }
   }
 
-  async function reveal() {
-    if (!provider || !account) {
-      setStatus("Connect your wallet first.");
-      return;
-    }
-
-    if (!entryId) {
-      setStatus("Enter your entry ID.");
-      return;
-    }
-
-    if (!selectedChoice || !nonce) {
-      setStatus("Choice and nonce are required.");
-      return;
-    }
-
-    setBusy(true);
-
-    try {
-      const writeClient = createWriteClient(
-        account as `0x${string}`,
-        provider,
-      );
-
-      const receipt = await revealChoice(
-        writeClient,
-        entryId,
-        selectedChoice,
-        nonce,
-      );
-
-      setStatus(
-        `Reveal submitted: ${String(receipt?.hash || receipt)}`,
-      );
-
-      await loadEntry();
-    } catch (error) {
-      setStatus(String(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function loadEntry() {
-    if (!entryId) return;
-
-    try {
-      const result = await getEntry(entryId);
-      setEntry(result);
-    } catch {
-      setEntry(null);
-    }
+  async function loadEntries(currentLoki: LokiState) {
+    if (!currentLoki.entry_ids?.length) { setEntries([]); return; }
+    const results = await Promise.all(currentLoki.entry_ids.map((id) => getEntry(id)));
+    setEntries(results);
   }
 
   async function doClaim() {
@@ -280,8 +185,7 @@ export default function Home() {
         <p className="eyebrow">PLAYER</p>
         <h1>Choose your outcome.</h1>
         <p className="hero-copy">
-          Enter an open LOKI, commit your choice, reveal it after closing,
-          and follow the verified result.
+          Enter an open LOKI, choose publicly on-chain, and follow the verified result.
         </p>
       </section>
 
@@ -401,61 +305,22 @@ export default function Home() {
           <section className="card">
             <div className="section-heading">
               <div>
-                <p className="eyebrow">REVEAL</p>
-                <h2>Reveal your committed choice</h2>
+                <p className="eyebrow">ENTRIES</p>
+                <h2>Public participation</h2>
               </div>
             </div>
-
-            <div className="form-grid">
-              <label>
-                Entry ID
-                <input
-                  value={entryId}
-                  onChange={(event) => setEntryId(event.target.value)}
-                  placeholder="Your entry ID"
-                />
-              </label>
-
-              <label>
-                Nonce
-                <input
-                  value={nonce}
-                  onChange={(event) => setNonce(event.target.value)}
-                  placeholder="The nonce used during entry"
-                />
-              </label>
-            </div>
-
-            <div className="actions">
-              <button
-                onClick={reveal}
-                disabled={busy || !account || !entryId}
-              >
-                Reveal choice
-              </button>
-
-              <button
-                className="secondary"
-                onClick={loadEntry}
-                disabled={!entryId}
-              >
-                Check entry
-              </button>
-            </div>
-
-            {entry && (
-              <div className="entry-result">
-                <p>
-                  <strong>Entry:</strong> {entry.id}
-                </p>
-                <p>
-                  <strong>Revealed:</strong>{" "}
-                  {entry.revealed ? "Yes" : "No"}
-                </p>
-                <p>
-                  <strong>Winner:</strong>{" "}
-                  {entry.is_winner ? "Yes" : "No"}
-                </p>
+            {entries.length === 0 ? (
+              <p className="muted">No entries yet.</p>
+            ) : (
+              <div className="entry-list">
+                {entries.map((item) => (
+                  <div className="entry-result" key={item.id}>
+                    <p><strong>User:</strong> <code>{item.player}</code></p>
+                    <p><strong>Choice:</strong> {item.choice}</p>
+                    <p><strong>Entered:</strong> {new Date(Number(item.entered_at) * 1000).toLocaleString()}</p>
+                    {loki.status === "SETTLED" && <p><strong>Result:</strong> {item.is_winner ? "Winner" : "Not selected"}</p>}
+                  </div>
+                ))}
               </div>
             )}
           </section>
