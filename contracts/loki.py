@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 
 from genlayer import *
 
@@ -138,7 +138,9 @@ class Loki(gl.Contract):
             "platform_fee": "0",
             "prize_pool": "0",
             "refund_pool": "0",
+            "unmatched_pool": "0",
             "settled": False,
+            "entry_ids": [],
         }
 
         self._save_loki(loki)
@@ -146,7 +148,7 @@ class Loki(gl.Contract):
         return loki_id
 
     @gl.public.write.payable
-    def enter_loki(self, loki_id: str, choice_commitment: str) -> str:
+    def enter_loki(self, loki_id: str, choice: str) -> str:
         loki = self._loki(loki_id)
 
         if loki["status"] != "OPEN":
@@ -159,19 +161,15 @@ class Loki(gl.Contract):
         if payment != int(loki["entry_amount"]):
             raise gl.vm.UserError("[EXPECTED] exact entry amount is required")
 
-        sender = str(gl.message.sender_address)
+        choice = _text(choice, "choice")
+        if not self._choice_exists(loki, choice):
+            raise gl.vm.UserError("[EXPECTED] choice is not in the published set")
 
-        for entry_id in loki["entry_ids"] if "entry_ids" in loki else []:
+        sender = str(gl.message.sender_address)
+        for entry_id in loki["entry_ids"]:
             entry = self._entry(entry_id)
             if entry["player"].lower() == sender.lower():
                 raise gl.vm.UserError("[EXPECTED] wallet already entered this LOKI")
-
-        if not isinstance(choice_commitment, str) or len(choice_commitment) != 64:
-            raise gl.vm.UserError("[EXPECTED] commitment must be a SHA-256 digest")
-        try:
-            bytes.fromhex(choice_commitment)
-        except ValueError:
-            raise gl.vm.UserError("[EXPECTED] commitment must be hexadecimal")
 
         entry_id = "entry-" + str(int(self.next_entry_id))
         self.next_entry_id = u256(int(self.next_entry_id) + 1)
@@ -180,9 +178,8 @@ class Loki(gl.Contract):
             "id": entry_id,
             "loki_id": loki_id,
             "player": sender,
-            "commitment": choice_commitment.lower(),
-            "choice": "",
-            "revealed": False,
+            "choice": choice,
+            "entered_at": str(_now()),
             "is_winner": False,
             "settlement": "PENDING",
         }
@@ -192,58 +189,24 @@ class Loki(gl.Contract):
 
         loki["participant_count"] = str(int(loki["participant_count"]) + 1)
         loki["total_pool"] = str(self._gross_pool(loki))
-        loki.setdefault("entry_ids", []).append(entry_id)
+        loki["entry_ids"].append(entry_id)
         self._save_loki(loki)
 
         return entry_id
 
-    @gl.public.write
-    def reveal_choice(self, entry_id: str, choice: str, nonce: str) -> None:
-        entry = self._entry(entry_id)
-        loki = self._loki(entry["loki_id"])
-
-        if entry["player"].lower() != str(gl.message.sender_address).lower():
-            raise gl.vm.UserError("[EXPECTED] only the player can reveal")
-
-        if loki["status"] not in ("CLOSED", "RANDOMIZED"):
-            raise gl.vm.UserError("[EXPECTED] LOKI must be closed before reveal")
-
-        if entry["revealed"]:
-            raise gl.vm.UserError("[EXPECTED] choice already revealed")
-
-        choice = _text(choice, "choice")
-        nonce = _text(nonce, "nonce", 256)
-
-        if not self._choice_exists(loki, choice):
-            raise gl.vm.UserError("[EXPECTED] choice is not in the published set")
-
-        expected = _digest(_json({
-            "version": "loki-v1",
-            "loki_id": entry["loki_id"],
-            "player": entry["player"].lower(),
-            "choice": choice,
-            "nonce": nonce,
-        }))
-
-        if expected != entry["commitment"]:
-            raise gl.vm.UserError("[EXPECTED] reveal does not match commitment")
-
-        entry["choice"] = choice
-        entry["revealed"] = True
-        self._save_entry(entry)
-
     def _randomness_input_hash(self, loki: dict) -> str:
         snapshot = []
-        for entry_id in loki.get("entry_ids", []):
+        for entry_id in loki["entry_ids"]:
             entry = self._entry(entry_id)
             snapshot.append({
                 "id": entry["id"],
                 "player": entry["player"].lower(),
-                "commitment": entry["commitment"],
+                "choice": entry["choice"],
+                "entered_at": entry["entered_at"],
             })
 
         payload = {
-            "version": "loki-random-v3",
+            "version": "loki-random-v4",
             "loki_id": loki["id"],
             "choices": loki["choices"],
             "entry_amount": loki["entry_amount"],
@@ -291,11 +254,11 @@ class Loki(gl.Contract):
 
         def leader_fn() -> dict:
             seed = self._protocol_transaction_seed()
-            material = b"LOKI/randomness/v3|" + seed + bytes.fromhex(randomness_input_hash)
+            material = b"LOKI/randomness/v4|" + seed + bytes.fromhex(randomness_input_hash)
             digest = hashlib.sha256(material).hexdigest()
             index = int(digest, 16) % len(choices)
             return {
-                "version": "loki-random-v3",
+                "version": "loki-random-v4",
                 "input_hash": randomness_input_hash,
                 "seed_hash": hashlib.sha256(seed).hexdigest(),
                 "digest": digest,
@@ -310,7 +273,7 @@ class Loki(gl.Contract):
             proposed = leader_result.calldata
             if not isinstance(proposed, dict):
                 return False
-            if proposed.get("version") != "loki-random-v3":
+            if proposed.get("version") != "loki-random-v4":
                 return False
             if proposed.get("input_hash") != randomness_input_hash:
                 return False
@@ -320,7 +283,7 @@ class Loki(gl.Contract):
             except Exception:
                 return False
 
-            material = b"LOKI/randomness/v3|" + seed + bytes.fromhex(randomness_input_hash)
+            material = b"LOKI/randomness/v4|" + seed + bytes.fromhex(randomness_input_hash)
             digest = hashlib.sha256(material).hexdigest()
             index = int(digest, 16) % len(choices)
 
@@ -368,27 +331,18 @@ class Loki(gl.Contract):
         if not loki["randomness_verified"]:
             raise gl.vm.UserError("[EXPECTED] randomness is not verified")
 
-        # Settlement cannot be triggered before players have had a chance to
-        # reveal their committed choices. This prevents an early settler from
-        # turning unrevealed entries into refunds.
-        for entry_id in loki.get("entry_ids", []):
-            entry = self._entry(entry_id)
-            if not entry["revealed"]:
-                raise gl.vm.UserError(
-                    "[EXPECTED] all committed choices must be revealed before settlement"
-                )
-
         winners: list[str] = []
 
-        for entry_id in loki.get("entry_ids", []):
+        for entry_id in loki["entry_ids"]:
             entry = self._entry(entry_id)
-
             entry["is_winner"] = (
                 entry["choice"].casefold() == loki["random_choice"].casefold()
             )
             if entry["is_winner"]:
                 winners.append(entry_id)
-
+                entry["settlement"] = "WIN"
+            else:
+                entry["settlement"] = "LOSE"
             self._save_entry(entry)
 
         gross = self._gross_pool(loki)
@@ -398,7 +352,8 @@ class Loki(gl.Contract):
         loki["platform_fee"] = str(fee)
         loki["winner_count"] = str(len(winners))
         loki["prize_pool"] = str(distributable if winners else 0)
-        loki["refund_pool"] = str(distributable if not winners else 0)
+        loki["refund_pool"] = "0"
+        loki["unmatched_pool"] = str(distributable if not winners else 0)
 
         if winners:
             share = distributable // len(winners)
@@ -410,25 +365,7 @@ class Loki(gl.Contract):
                 account = Address(entry["player"])
                 current = int(self.claimable[account]) if account in self.claimable else 0
                 self.claimable[account] = u256(current + amount)
-                entry["settlement"] = "WIN"
                 self._save_entry(entry)
-        else:
-            participants = []
-            for entry_id in loki.get("entry_ids", []):
-                entry = self._entry(entry_id)
-                participants.append(entry)
-
-            if participants:
-                refund_share = distributable // len(participants)
-                remainder = distributable - refund_share * len(participants)
-
-                for index, entry in enumerate(participants):
-                    amount = refund_share + (remainder if index == 0 else 0)
-                    account = Address(entry["player"])
-                    current = int(self.claimable[account]) if account in self.claimable else 0
-                    self.claimable[account] = u256(current + amount)
-                    entry["settlement"] = "REFUND"
-                    self._save_entry(entry)
 
         self.platform_fees = u256(int(self.platform_fees) + fee)
         loki["settled"] = True
