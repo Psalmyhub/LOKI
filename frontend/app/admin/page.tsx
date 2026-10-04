@@ -63,6 +63,8 @@ export default function AdminPage() {
     "Connect the publisher wallet to continue.",
   );
   const [busy, setBusy] = useState(false);
+  const [published, setPublished] = useState(false);
+  const [copyState, setCopyState] = useState("Copy share link");
 
   const authorized =
     account?.toLowerCase() === ADMIN_WALLET.toLowerCase();
@@ -154,6 +156,22 @@ export default function AdminPage() {
       ethereum.removeListener?.("chainChanged", handleChainChanged);
     };
   }, []);
+
+  function shareUrl(id: string) {
+    if (typeof window === "undefined") return `/?loki=${encodeURIComponent(id)}`;
+    return `${window.location.origin}/?loki=${encodeURIComponent(id)}`;
+  }
+
+  async function copyShareLink(id: string) {
+    const url = shareUrl(id);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyState("Link copied");
+      window.setTimeout(() => setCopyState("Copy share link"), 1800);
+    } catch {
+      setCopyState("Copy failed — copy the link from your browser");
+    }
+  }
 
   async function loadLoki(id = lokiId) {
     if (!id) return;
@@ -403,6 +421,43 @@ export default function AdminPage() {
           only submits authorized transactions.
         </p>
       </section>
+
+      {published && loki && (
+        <section className="card">
+          <p className="eyebrow">PUBLISHED</p>
+          <h2>LOKI PUBLISHED</h2>
+          <p className="muted">
+            Your LOKI is now published and available for participants to join.
+          </p>
+
+          <div className="stack">
+            <div className="admin-status">
+              <div>
+                <span>LOKI ID</span>
+                <strong>{loki.id}</strong>
+              </div>
+              <div>
+                <span>Status</span>
+                <strong>{loki.status}</strong>
+              </div>
+            </div>
+
+            <label>
+              Share link
+              <input value={shareUrl(loki.id)} readOnly />
+            </label>
+
+            <div className="actions">
+              <button onClick={() => void copyShareLink(loki.id)}>
+                {copyState}
+              </button>
+              <a className="secondary-link" href={shareUrl(loki.id)}>
+                Open player page
+              </a>
+            </div>
+          </div>
+        </section>
+      )}
 
       <div className="admin-grid">
         <section className="card">
