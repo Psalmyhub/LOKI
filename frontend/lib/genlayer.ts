@@ -81,6 +81,9 @@ export function createWriteClient(
   });
 }
 
+const LOKI_TX_POLL_INTERVAL_MS = 3000;
+const LOKI_TX_POLL_RETRIES = 120;
+
 export async function waitForLokiTransaction(
   client: LokiWriteClient,
   hash: Parameters<LokiWriteClient["waitForTransactionReceipt"]>[0]["hash"],
@@ -88,21 +91,70 @@ export async function waitForLokiTransaction(
   const receipt = await client.waitForTransactionReceipt({
     hash,
     status: TransactionStatus.FINALIZED,
-    interval: 3000,
-    retries: 120,
+    interval: LOKI_TX_POLL_INTERVAL_MS,
+    retries: LOKI_TX_POLL_RETRIES,
   });
 
+  let transaction = receipt;
+
   if (
-    receipt.txExecutionResultName !== ExecutionResult.FINISHED_WITH_RETURN
+    transaction.txExecutionResultName === ExecutionResult.FINISHED_WITH_RETURN
   ) {
-    const execution =
-      receipt.txExecutionResultName || ExecutionResult.NOT_VOTED;
+    return transaction;
+  }
+
+  if (
+    transaction.txExecutionResultName === ExecutionResult.FINISHED_WITH_ERROR
+  ) {
     throw new Error(
-      `GenLayer transaction finalized with execution result: ${execution}`,
+      "GenLayer transaction finalized, but contract execution failed.",
     );
   }
 
-  return receipt;
+  // FINALIZED only means consensus finality. On Studio, execution can still
+  // report NOT_VOTED. Never resubmit the transaction in that state: poll the
+  // existing transaction hash until GenLayer records its execution result.
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < LOKI_TX_POLL_RETRIES; attempt += 1) {
+    await new Promise((resolve) =>
+      window.setTimeout(resolve, LOKI_TX_POLL_INTERVAL_MS),
+    );
+
+    try {
+      transaction = await client.getTransaction({ hash });
+      lastError = null;
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
+
+    if (
+      transaction.txExecutionResultName ===
+      ExecutionResult.FINISHED_WITH_RETURN
+    ) {
+      return transaction;
+    }
+
+    if (
+      transaction.txExecutionResultName ===
+      ExecutionResult.FINISHED_WITH_ERROR
+    ) {
+      throw new Error(
+        "GenLayer transaction finalized, but contract execution failed.",
+      );
+    }
+  }
+
+  if (lastError) {
+    throw new Error(
+      `Timed out while polling the existing GenLayer transaction: ${String(lastError)}`,
+    );
+  }
+
+  throw new Error(
+    "Timed out waiting for GenLayer contract execution to complete. The existing transaction was not resubmitted.",
+  );
 }
 
 export function extractContractReturnValue(
