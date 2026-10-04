@@ -142,7 +142,9 @@ export default function Home() {
       }),
     );
 
-    setMyLokiIds(mine.filter((id): id is string => id !== null));
+    const ids = mine.filter((id): id is string => id !== null);
+    setMyLokiIds(ids);
+    return ids;
   }
 
   function filteredLokis() {
@@ -383,14 +385,14 @@ export default function Home() {
     setLokiFilter(filter);
 
     const published = await discoverLokis();
-    await refreshMyLokis(published, account);
+    const myIds = await refreshMyLokis(published, account);
 
     const now = Date.now() / 1000;
     const next = filter === "current"
       ? published.filter((item) => item.status === "OPEN" && Number(item.closes_at) > now)
       : filter === "ended"
         ? published.filter((item) => item.status !== "OPEN" || Number(item.closes_at) <= now)
-        : published.filter((item) => myLokiIds.includes(item.id));
+        : published.filter((item) => myIds.includes(item.id));
 
     if (!next.length) {
       setLoki(null);
