@@ -1,5 +1,9 @@
-import { createClient, isSuccessful } from "genlayer-js";
+import { createClient } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
+import {
+  ExecutionResult,
+  TransactionStatus,
+} from "genlayer-js/types";
 
 export const LOKI_CONTRACT_ADDRESS =
   "0x8bbC34e492b5f9c3DA16Eb49ecbd2a99268F368F" as `0x${string}`;
@@ -79,17 +83,22 @@ export function createWriteClient(
 
 export async function waitForLokiTransaction(
   client: LokiWriteClient,
-  hash: Parameters<LokiWriteClient["waitForFinalization"]>[0]["hash"],
+  hash: Parameters<LokiWriteClient["waitForTransactionReceipt"]>[0]["hash"],
 ) {
-  const receipt = await client.waitForFinalization({
+  const receipt = await client.waitForTransactionReceipt({
     hash,
+    status: TransactionStatus.FINALIZED,
     interval: 3000,
     retries: 120,
   });
 
-  if (!isSuccessful(receipt)) {
+  if (
+    receipt.txExecutionResultName !== ExecutionResult.FINISHED_WITH_RETURN
+  ) {
+    const execution =
+      receipt.txExecutionResultName || ExecutionResult.NOT_VOTED;
     throw new Error(
-      `GenLayer transaction did not succeed: ${receipt.statusName || "UNKNOWN"} / ${receipt.txExecutionResultName || "UNKNOWN"}`,
+      `GenLayer transaction finalized with execution result: ${execution}`,
     );
   }
 
