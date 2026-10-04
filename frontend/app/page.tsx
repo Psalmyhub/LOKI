@@ -49,6 +49,8 @@ export default function Home() {
   const [remaining, setRemaining] = useState("");
   const [claimed, setClaimed] = useState(false);
   const [copyState, setCopyState] = useState("Copy share link");
+  const [lokiFilter, setLokiFilter] = useState<"current" | "ended" | "my">("current");
+  const [myLokiIds, setMyLokiIds] = useState<string[]>([]);
   const progressInFlight = useRef(false);
 
   const isClosed = useMemo(() => {
@@ -77,23 +79,24 @@ export default function Home() {
   }
 
   async function disconnect() {
-    try {
-      if (provider) {
-        try {
-          await provider.request({
-            method: "wallet_revokePermissions",
-            params: [{ eth_accounts: {} }],
-          });
-        } catch {
-          // Some injected wallets do not implement EIP-2255. Local logout
-          // still disconnects this dapp session.
-        }
+    const activeProvider = provider;
+
+    setProvider(null);
+    setAccount(null);
+    setEntry(null);
+    setEntryId("");
+    setClaimed(false);
+    setStatus("Wallet disconnected. Connect wallet to sign in again.");
+
+    if (activeProvider) {
+      try {
+        await activeProvider.request({
+          method: "wallet_revokePermissions",
+          params: [{ eth_accounts: {} }],
+        });
+      } catch {
+        // Wallets without EIP-2255 still get a complete local dapp logout.
       }
-    } finally {
-      setProvider(null);
-      setAccount(null);
-      setClaimed(false);
-      setStatus("Wallet disconnected.");
     }
   }
 
@@ -114,10 +117,63 @@ export default function Home() {
     return published;
   }
 
+  async function refreshMyLokis(published: LokiState[], wallet: string | null) {
+    if (!wallet) {
+      setMyLokiIds([]);
+      return;
+    }
+
+    const mine = await Promise.all(
+      published.map(async (item) => {
+        if (!item.entry_ids?.length) return null;
+
+        const found = await Promise.all(
+          item.entry_ids.map(async (id) => {
+            try {
+              const itemEntry = await getEntry(id);
+              return itemEntry.player.toLowerCase() === wallet.toLowerCase();
+            } catch {
+              return false;
+            }
+          }),
+        );
+
+        return found.some(Boolean) ? item.id : null;
+      }),
+    );
+
+    setMyLokiIds(mine.filter((id): id is string => id !== null));
+  }
+
+  function filteredLokis() {
+    const now = Date.now() / 1000;
+
+    if (lokiFilter === "current") {
+      return availableLokis.filter(
+        (item) => item.status === "OPEN" && Number(item.closes_at) > now,
+      );
+    }
+
+    if (lokiFilter === "ended") {
+      return availableLokis.filter(
+        (item) => item.status !== "OPEN" || Number(item.closes_at) <= now,
+      );
+    }
+
+    return availableLokis.filter((item) => myLokiIds.includes(item.id));
+  }
+
   async function refresh(options: { silent?: boolean } = {}) {
     if (!lokiId) {
       const published = await discoverLokis();
-      const first = published[0];
+      await refreshMyLokis(published, account);
+      const first = published.find((item) =>
+        lokiFilter === "current"
+          ? item.status === "OPEN" && Number(item.closes_at) > Date.now() / 1000
+          : lokiFilter === "ended"
+            ? item.status !== "OPEN" || Number(item.closes_at) <= Date.now() / 1000
+            : myLokiIds.includes(item.id),
+      );
       if (first) {
         setLokiId(first.id);
         setLoki(first);
@@ -166,7 +222,7 @@ export default function Home() {
       setLokiId(sharedId);
       void getLoki(sharedId).then((result) => {
         setLoki(result);
-        setSelectedChoice(result.choices[0] ?? "");
+        setSelectedChoice("");
         void loadEntries(result);
       }).catch(() => {
         setStatus(`Unable to load shared ${sharedId}.`);
@@ -179,7 +235,7 @@ export default function Home() {
       if (first) {
         setLokiId(first.id);
         setLoki(first);
-        setSelectedChoice(first.choices[0] ?? "");
+        setSelectedChoice("");
         void loadEntries(first);
       }
     });
@@ -203,13 +259,24 @@ export default function Home() {
     if (!loki) return;
 
     const timer = window.setInterval(() => {
-      void discoverLokis();
-      void refresh({ silent: true });
+      const published = await discoverLokis();
+      await refreshMyLokis(published, account);
+      await refresh({ silent: true });
     }, 4000);
 
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lokiId, loki?.status, loki?.closes_at]);
+
+  useEffect(() => {
+    const sync = async () => {
+      const published = await discoverLokis();
+      await refreshMyLokis(published, account);
+    };
+
+    void sync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account]);
 
   useEffect(() => {
     if (!provider || !account || !loki) return;
@@ -311,6 +378,40 @@ export default function Home() {
       ethereum.removeListener?.("chainChanged", handleChainChanged);
     };
   }, []);
+
+  async function selectFilter(filter: "current" | "ended" | "my") {
+    setLokiFilter(filter);
+
+    const published = await discoverLokis();
+    await refreshMyLokis(published, account);
+
+    const now = Date.now() / 1000;
+    const next = filter === "current"
+      ? published.filter((item) => item.status === "OPEN" && Number(item.closes_at) > now)
+      : filter === "ended"
+        ? published.filter((item) => item.status !== "OPEN" || Number(item.closes_at) <= now)
+        : published.filter((item) => myLokiIds.includes(item.id));
+
+    if (!next.length) {
+      setLoki(null);
+      setLokiId("");
+      setSelectedChoice("");
+      setStatus(
+        filter === "my"
+          ? "You have not entered a LOKI yet."
+          : filter === "ended"
+            ? "No ended LOKIs are available."
+            : "No current LOKIs are available.",
+      );
+      return;
+    }
+
+    const nextLoki = next[0];
+    setLokiId(nextLoki.id);
+    setLoki(nextLoki);
+    setSelectedChoice("");
+    await loadEntries(nextLoki);
+  }
 
   async function participate() {
     if (!provider || !account) { setStatus("Connect your wallet first."); return; }
@@ -440,11 +541,29 @@ export default function Home() {
       </header>
 
       <section className="hero">
-        <p className="eyebrow">PLAYER</p>
-        <h1>Choose your outcome.</h1>
+        <p className="eyebrow">WELCOME TO LOKI</p>
+        <h1>Predict. Participate. Follow the verified outcome.</h1>
         <p className="hero-copy">
-          Enter an open LOKI, choose publicly on-chain, and follow the verified result.
+          LOKI is a permissionless prediction market powered by GenLayer.
+          A publisher creates a LOKI with a fixed entry amount and a closing
+          time. Participants choose one published outcome, that choice is
+          recorded publicly on-chain, and GenLayer verifies the random outcome
+          after the LOKI closes.
         </p>
+      </section>
+
+      <section className="card landing-card">
+        <div className="landing-grid">
+          <div>
+            <p className="eyebrow">HOW LOKI WORKS</p>
+            <h2>One simple flow.</h2>
+          </div>
+          <div className="landing-points">
+            <p><strong>1. Enter</strong><br />Connect your wallet and choose an outcome before the deadline.</p>
+            <p><strong>2. Close</strong><br />When the deadline arrives, the LOKI closes and GenLayer verifies the random outcome.</p>
+            <p><strong>3. Settle</strong><br />Matching participants share the prize pool after the 1% platform fee. If nobody matches, the 99% net pool is shared by all participants.</p>
+          </div>
+        </div>
       </section>
 
       <section className="card">
@@ -455,15 +574,34 @@ export default function Home() {
           </div>
           <button className="secondary" onClick={() => void refresh()} disabled={busy}>Refresh</button>
         </div>
-        {availableLokis.length === 0 ? (
-          <p className="muted">No published LOKIs are currently available.</p>
+
+        <div className="filter-row">
+          {(["current", "ended", "my"] as const).map((filter) => (
+            <button
+              key={filter}
+              className={lokiFilter === filter ? "secondary filter-button active" : "secondary filter-button"}
+              onClick={() => void selectFilter(filter)}
+            >
+              {filter === "current" ? "Current LOKI" : filter === "ended" ? "Ended LOKI" : "My LOKI"}
+            </button>
+          ))}
+        </div>
+
+        {filteredLokis().length === 0 ? (
+          <p className="muted">
+            {lokiFilter === "my"
+              ? "You have not entered a LOKI yet."
+              : lokiFilter === "ended"
+                ? "No ended LOKIs are available."
+                : "No current LOKIs are available."}
+          </p>
         ) : (
           <div className="choices">
-            {availableLokis.map((item) => (
+            {filteredLokis().map((item) => (
               <button key={item.id} className={lokiId === item.id ? "choice selected" : "choice"} onClick={() => {
                 setLokiId(item.id);
                 setLoki(item);
-                setSelectedChoice(item.choices[0] ?? "");
+                setSelectedChoice("");
                 void loadEntries(item);
               }}>
                 <strong>{item.title}</strong>
@@ -497,14 +635,6 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="share-box">
-              <span>Share this LOKI</span>
-              <code>{shareUrl(loki.id)}</code>
-              <button className="secondary" onClick={() => void copyShareLink(loki.id)}>
-                {copyState}
-              </button>
-            </div>
-
             <div className="stats">
               <div>
                 <span>Participants</span>
@@ -530,6 +660,13 @@ export default function Home() {
               </div>
             </div>
 
+            {!selectedChoice && !isClosed && loki.status === "OPEN" && (
+              <div className="choice-prompt">
+                Choose one of the published outcomes below before submitting your entry.
+                Your selected choice will be recorded publicly on-chain.
+              </div>
+            )}
+
             <div className="choices">
               {loki.choices.map((choice) => (
                 <button
@@ -551,11 +688,12 @@ export default function Home() {
                 disabled={
                   busy ||
                   !account ||
+                  !selectedChoice ||
                   loki.status !== "OPEN" ||
                   isClosed
                 }
               >
-                Enter LOKI
+                {selectedChoice ? "Enter LOKI" : "Choose an outcome first"}
               </button>
             </div>
           </section>
@@ -563,47 +701,21 @@ export default function Home() {
           <section className="card">
             <p className="eyebrow">LOKI SYSTEM</p>
             <h2>Live progress</h2>
-            <div className="verification">
-              <div>
-                <span>1. LOKI</span>
-                <strong>{loki.status === "OPEN" ? "OPEN" : "CLOSED"}</strong>
-              </div>
-              <div>
-                <span>2. Randomness</span>
-                <strong>
-                  {loki.status === "OPEN"
-                    ? isClosed
-                      ? "CLOSING — CONSENSUS PENDING"
-                      : "WAITING FOR CLOSE"
-                    : "VERIFIED"}
-                </strong>
-              </div>
-              <div>
-                <span>3. Random choice</span>
-                <strong>{loki.random_choice || "Pending GenLayer judgment"}</strong>
-              </div>
-              <div>
-                <span>4. Winners review</span>
-                <strong>
-                  {loki.status === "SETTLED"
-                    ? "COMPLETE"
+            <div className="current-state">
+              <span>Current state</span>
+              <strong>
+                {loki.status === "OPEN" && !isClosed
+                  ? `OPEN — accepting entries · closes in ${remaining}`
+                  : loki.status === "OPEN"
+                    ? "CLOSED — randomness pending"
                     : loki.status === "RANDOMIZED"
-                      ? "READY"
-                      : "WAITING FOR RANDOMNESS"}
-                </strong>
-              </div>
-              <div>
-                <span>5. Winners</span>
-                <strong>
-                  {loki.status === "SETTLED"
-                    ? `${loki.winner_count} winner(s)`
-                    : "Waiting for settlement"}
-                </strong>
-              </div>
+                      ? `RANDOMNESS VERIFIED — ${loki.random_choice}`
+                      : `SETTLED — ${loki.winner_count} winner(s)`}
+              </strong>
             </div>
             <p className="muted">
-              The page checks the on-chain LOKI state every 4 seconds, so you can
-              watch the transition without manually refreshing.
+              Only the state the LOKI is currently in is displayed. The next state
+              appears only after the on-chain state reaches it.
             </p>
           </section>
 
