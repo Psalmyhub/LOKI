@@ -27,9 +27,7 @@ const DURATION_OPTIONS = [
   { label: "1 hour", seconds: 3600 },
 ];
 
-type EthereumProvider = {
-  request(args: { method: string; params?: unknown[] }): Promise<any>;
-};
+type EthereumProvider = WalletProvider;
 
 function formatRemaining(closesAt: string) {
   const seconds = Math.max(
