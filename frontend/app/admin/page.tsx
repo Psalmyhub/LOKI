@@ -321,39 +321,23 @@ export default function AdminPage() {
   }
 
   /*
-   * Automatic close trigger.
+   * Wallet connection is intentionally separate from transaction submission.
+   * Do not automatically call close_loki() or settle_loki() from a React
+   * effect: doing so makes a wallet connection unexpectedly open MetaMask.
    *
-   * The timestamp stored by the contract remains authoritative.
-   * This timer merely submits close_loki() once the deadline arrives.
-   *
-   * If the browser is closed, another wallet/keeper can still call
-   * close_loki() after the deadline because the contract is permissionless.
+   * Closing and settlement remain available through the explicit controls
+   * below. The contract is permissionless, so a separate keeper can also
+   * trigger these operations after the deadline.
    */
   useEffect(() => {
-    if (!authorized || !provider || !loki) return;
-    if (loki.status !== "OPEN") return;
+    if (!loki) return;
 
-    const check = async () => {
-      if (loki.status === "OPEN") {
-        if (Date.now() / 1000 < Number(loki.closes_at)) return;
-        await close();
-        return;
-      }
-
-      if (loki.status === "RANDOMIZED" && !loki.settled && !busy) {
-        await settle();
-      }
-    };
-
-    const timer = window.setInterval(() => {
-      void check();
-    }, 1000);
-
-    void check();
-
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authorized, provider, loki?.id, loki?.status, loki?.closes_at]);
+    if (loki.status === "OPEN" && Date.now() / 1000 >= Number(loki.closes_at)) {
+      setStatus("LOKI deadline reached. Close + randomize is ready.");
+    } else if (loki.status === "RANDOMIZED" && !loki.settled) {
+      setStatus("Randomness verified. Settlement is ready.");
+    }
+  }, [loki?.id, loki?.status, loki?.closes_at, loki?.settled]);
 
   if (!authorized) {
     return (
