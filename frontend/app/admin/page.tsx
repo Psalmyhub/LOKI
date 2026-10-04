@@ -5,6 +5,8 @@ import {
   LOKI_CONTRACT_ADDRESS,
   createWriteClient,
   extractContractReturnValue,
+  ensureStudionet,
+  type WalletProvider,
 } from "../../lib/genlayer";
 import {
   closeLoki,
@@ -76,25 +78,27 @@ export default function AdminPage() {
     }
 
     try {
+      setStatus("Connecting publisher wallet and checking GenLayer Studionet...");
+      await ensureStudionet(ethereum);
+
       const addresses = (await ethereum.request({
         method: "eth_requestAccounts",
       })) as string[];
 
       const address = addresses[0];
+      if (!address) throw new Error("No wallet account returned.");
 
       setProvider(ethereum);
       setAccount(address);
 
       if (address.toLowerCase() !== ADMIN_WALLET.toLowerCase()) {
-        setStatus(
-          `Connected wallet is not authorized for publisher controls.`,
-        );
+        setStatus("Connected wallet is not authorized for publisher controls.");
         return;
       }
 
-      setStatus("Publisher wallet authorized.");
+      setStatus("Publisher wallet authorized on GenLayer Studionet.");
     } catch (error) {
-      setStatus(String(error));
+      setStatus(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -116,6 +120,42 @@ export default function AdminPage() {
       setStatus("Wallet disconnected.");
     }
   }
+
+  useEffect(() => {
+    const ethereum = window.ethereum;
+    if (!ethereum?.on) return;
+
+    const handleAccountsChanged = (accounts: unknown) => {
+      const next = Array.isArray(accounts) ? accounts[0] : undefined;
+      setAccount(typeof next === "string" && next ? next : null);
+      if (typeof next === "string" && next) {
+        setStatus(
+          next.toLowerCase() === ADMIN_WALLET.toLowerCase()
+            ? "Publisher wallet authorized."
+            : "Connected wallet is not authorized for publisher controls.",
+        );
+      } else {
+        setProvider(null);
+        setStatus("Wallet disconnected.");
+      }
+    };
+
+    const handleChainChanged = (chainId: unknown) => {
+      if (String(chainId).toLowerCase() !== "0xf22f") {
+        setProvider(null);
+        setAccount(null);
+        setStatus("Wallet network changed. Please reconnect to GenLayer Studionet (chain 61999).");
+      }
+    };
+
+    ethereum.on("accountsChanged", handleAccountsChanged);
+    ethereum.on("chainChanged", handleChainChanged);
+
+    return () => {
+      ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
+      ethereum.removeListener?.("chainChanged", handleChainChanged);
+    };
+  }, []);
 
   async function loadLoki(id = lokiId) {
     if (!id) return;
