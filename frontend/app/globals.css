@@ -302,6 +302,85 @@ button:disabled {
   background: #1a202a;
 }
 
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.filter-button {
+  border: 1px solid #303846;
+  opacity: 0.72;
+}
+
+.filter-button.active {
+  opacity: 1;
+  border-color: #f5f7fa;
+}
+
+.choice-prompt {
+  margin-bottom: 12px;
+  padding: 13px 14px;
+  border: 1px solid #303846;
+  border-radius: 10px;
+  background: #0c1017;
+  color: #c8d0dc;
+  line-height: 1.5;
+}
+
+.current-state {
+  padding: 18px;
+  border: 1px solid #303846;
+  border-radius: 14px;
+  background: #0c1017;
+}
+
+.current-state span {
+  display: block;
+  margin-bottom: 8px;
+  color: #8993a4;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.current-state strong {
+  display: block;
+  font-size: 20px;
+  line-height: 1.4;
+}
+
+.landing-card {
+  margin-bottom: 22px;
+}
+
+.landing-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
+  gap: 30px;
+  align-items: start;
+}
+
+.landing-points {
+  display: grid;
+  gap: 12px;
+}
+
+.landing-points p {
+  margin: 0;
+  padding: 14px 16px;
+  border-left: 2px solid #303846;
+  color: #aeb7c5;
+  line-height: 1.55;
+}
+
+.landing-points strong {
+  color: #f5f7fa;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -395,6 +474,7 @@ footer {
     flex-wrap: wrap;
   }
 
+  .landing-grid,
   .admin-grid,
   .form-grid,
   .stats,
