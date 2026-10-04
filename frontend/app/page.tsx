@@ -192,7 +192,6 @@ export default function Home() {
       const result = await getLoki(lokiId);
       setLoki(result);
       await loadEntries(result);
-      if (result.choices.length > 0 && !selectedChoice) setSelectedChoice(result.choices[0]);
       if (!options.silent) setStatus(`Loaded ${lokiId}.`);
     } catch (error) {
       if (!options.silent) {
@@ -261,9 +260,11 @@ export default function Home() {
     if (!loki) return;
 
     const timer = window.setInterval(() => {
-      const published = await discoverLokis();
-      await refreshMyLokis(published, account);
-      await refresh({ silent: true });
+      void (async () => {
+        const published = await discoverLokis();
+        await refreshMyLokis(published, account);
+        await refresh({ silent: true });
+      })();
     }, 4000);
 
     return () => window.clearInterval(timer);
@@ -530,12 +531,6 @@ export default function Home() {
         </div>
 
         <div className="header-actions">
-          {account && (
-            <a className="secondary-link" href="/admin">
-              Publisher dashboard
-            </a>
-          )}
-
           <button onClick={account ? disconnect : connect}>
             {account ? "Disconnect wallet" : "Connect wallet"}
           </button>
