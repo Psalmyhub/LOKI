@@ -205,8 +205,26 @@ export default function Home() {
       }),
     );
 
-    setEntries(results.filter((item): item is LokiEntry => item !== null));
+    const loadedEntries = results.filter(
+      (item): item is LokiEntry => item !== null,
+    );
+    setEntries(loadedEntries);
+
+    if (account) {
+      const mine = loadedEntries.find(
+        (item) => item.player.toLowerCase() === account.toLowerCase(),
+      );
+      setEntry(mine ?? null);
+      setEntryId(mine?.id ?? "");
+    }
   }
+
+  useEffect(() => {
+    if (account) {
+      void refresh({ silent: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account]);
 
   async function doClaim() {
     if (!provider || !account) {
