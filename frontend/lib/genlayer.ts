@@ -10,10 +10,13 @@ export const LOKI_CONTRACT_ADDRESS =
 
 export const LOKI_CHAIN = studionet;
 export const LOKI_CHAIN_ID = 61999;
+export const LOKI_CHAIN_ID_HEX = "0xf22f";
 export const LOKI_RPC = "https://studio.genlayer.com/api";
 
 export type WalletProvider = {
   request(args: { method: string; params?: unknown[] }): Promise<any>;
+  on?: (event: string, listener: (...args: any[]) => void) => void;
+  removeListener?: (event: string, listener: (...args: any[]) => void) => void;
 };
 
 export type LokiWriteClient = ReturnType<typeof createClient>;
@@ -21,6 +24,51 @@ export type LokiWriteClient = ReturnType<typeof createClient>;
 export const readClient = createClient({
   chain: studionet,
 });
+
+export async function ensureStudionet(provider: WalletProvider) {
+  const chainId = String(await provider.request({ method: "eth_chainId" })).toLowerCase();
+
+  if (chainId === LOKI_CHAIN_ID_HEX) {
+    return;
+  }
+
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: LOKI_CHAIN_ID_HEX }],
+    });
+  } catch (error: any) {
+    if (error?.code !== 4902) {
+      throw new Error(
+        `Please switch your wallet to GenLayer Studionet (chain 61999). ${error?.message || ""}`.trim(),
+      );
+    }
+
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [
+        {
+          chainId: LOKI_CHAIN_ID_HEX,
+          chainName: "GenLayer Studionet",
+          nativeCurrency: {
+            name: "GEN",
+            symbol: "GEN",
+            decimals: 18,
+          },
+          rpcUrls: [LOKI_RPC],
+        },
+      ],
+    });
+
+    const verifiedChainId = String(
+      await provider.request({ method: "eth_chainId" }),
+    ).toLowerCase();
+
+    if (verifiedChainId !== LOKI_CHAIN_ID_HEX) {
+      throw new Error("Wallet did not switch to GenLayer Studionet.");
+    }
+  }
+}
 
 export function createWriteClient(
   walletAddress: `0x${string}`,
