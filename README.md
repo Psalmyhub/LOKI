@@ -1,44 +1,50 @@
-# Loki
+# LOKI
 
-Loki is a GenLayer-based peer-to-peer virtual prediction protocol.
+LOKI is a GenLayer-based public-choice prediction protocol.
 
 ## Core protocol
 
-1. A publisher creates a LOKI with an immutable choice set and entry amount.
-2. The entry amount is fixed for that LOKI once it opens.
-3. Every participant must pay exactly that amount and may enter only once.
-4. A participant commits their single choice onchain.
-5. After the LOKI closes, choices are revealed and bound to their original commitments.
-6. A GenLayer-supported randomness mechanism determines exactly one system choice.
-7. GenLayer validators verify the randomness result and compare the accepted system choice with each user's committed prediction.
-8. Every exact match is a winner.
-9. The platform takes a 1% fee from the gross pool.
-10. If there are winners, the remaining 99% is divided equally among them.
-11. If there are no winners, the remaining 99% is returned equally to participants.
+1. A publisher creates a LOKI with a fixed title, category, published choice set, fixed entry amount, and closing time.
+2. The LOKI opens immediately for public participation.
+3. Each wallet can enter once and must pay exactly the fixed entry amount.
+4. A participant selects one published choice and that choice is stored publicly on-chain with their wallet and entry timestamp.
+5. There is no commit/reveal flow and participants are never asked to reveal their choice later.
+6. After the closing time, `close_loki()` verifies the deadline and atomically starts protocol transaction-bound randomness.
+7. GenLayer consensus verifies the random selection. The random result is always one of the LOKI's published choices.
+8. Every participant whose stored choice matches the verified random choice is a winner.
+9. The platform takes exactly a 1% fee from the gross pool.
+10. If there are winners, the remaining 99% is divided equally among all winners.
+11. If there are no winners, the remaining 99% is divided equally among all participants as `NO_WINNER_SHARE`.
+12. Participants claim their recorded settlement through `claim()`.
 
 ## Security invariants
 
-- No admin can supply the winning choice.
 - No participant can supply the winning choice.
 - The frontend is never trusted for randomness or settlement.
-- The choice set is fixed for the lifetime of a LOKI.
-- The entry amount is fixed for the lifetime of a LOKI once participation opens.
+- The published choice set is fixed for the lifetime of a LOKI.
+- The entry amount is fixed for the lifetime of a LOKI.
 - Each wallet can enter a LOKI only once.
-- A player cannot change a committed choice.
-- User participation counts must not be used as weights for the random choice.
+- A player cannot change a stored public choice.
+- Random selection is over the published choices, not over participant wallets.
 - The platform fee is exactly 1% of the gross pool.
-- Randomness must come from a verified GenLayer-supported primitive; Loki must never accept a caller-supplied random result.
+- Randomness uses the protocol transaction seed and GenLayer consensus; the frontend never supplies randomness.
+- `resolve_randomness()` is a compatibility endpoint that deliberately rejects caller-driven randomness; randomness is performed atomically by `close_loki()`.
 
-## Current implementation status
+## Current network
 
-The deterministic economic and commitment foundation is being built first.
+- Studionet chain ID: `61999`
+- RPC: `https://studio.genlayer.com/api`
+- Active deployed LOKI contract: `0x8bbC34e492b5f9c3DA16Eb49ecbd2a99268F368F`
+- Publisher wallet configured by the frontend: `0xB41f7CcF919515a4741C7A7Ad43cFfCd56A20Ee31`
 
-The randomness boundary is intentionally blocked until the exact current GenLayer-supported application-level randomness API is verified. GenLayer documents randomness as a nondeterministic operation and distinguishes this from its protocol ECVRF seed used for validator/leader/committee selection. We will not substitute an LLM, frontend RNG, admin seed, block timestamp, or caller-provided value.
+## Important deployment note
+
+The deployed contract address above is immutable. If contract logic is changed, a new deployment is required and the frontend must be pointed to the new address.
 
 ## Payment asset
 
-The first contract skeleton uses the native payable value path. The final production payment asset (native GEN versus a supported token such as a stablecoin) must be explicitly selected before deployment.
+LOKI currently uses the native payable value path exposed by the GenLayer contract.
 
-## Development rule
+## Project separation
 
-Prolly is a completely separate project and is not part of Loki.
+LOKI is separate from Prolly and must not share contract, frontend, or deployment assumptions with Prolly.
