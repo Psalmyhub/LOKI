@@ -48,6 +48,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [remaining, setRemaining] = useState("");
   const [claimed, setClaimed] = useState(false);
+  const [copyState, setCopyState] = useState("Copy share link");
   const progressInFlight = useRef(false);
 
   const isClosed = useMemo(() => {
@@ -143,7 +144,36 @@ export default function Home() {
     }
   }
 
+  function shareUrl(id: string) {
+    if (typeof window === "undefined") return `/?loki=${encodeURIComponent(id)}`;
+    return `${window.location.origin}/?loki=${encodeURIComponent(id)}`;
+  }
+
+  async function copyShareLink(id: string) {
+    const url = shareUrl(id);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyState("Link copied");
+      window.setTimeout(() => setCopyState("Copy share link"), 1800);
+    } catch {
+      setCopyState("Copy failed — copy the link from your browser");
+    }
+  }
+
   useEffect(() => {
+    const sharedId = new URLSearchParams(window.location.search).get("loki");
+    if (sharedId) {
+      setLokiId(sharedId);
+      void getLoki(sharedId).then((result) => {
+        setLoki(result);
+        setSelectedChoice(result.choices[0] ?? "");
+        void loadEntries(result);
+      }).catch(() => {
+        setStatus(`Unable to load shared ${sharedId}.`);
+      });
+      return;
+    }
+
     void discoverLokis().then((published) => {
       const first = published[0];
       if (first) {
@@ -454,9 +484,25 @@ export default function Home() {
                 <h2>{loki.title}</h2>
               </div>
 
-              <span className={`badge ${loki.status.toLowerCase()}`}>
-                {loki.status}
-              </span>
+              <div className="header-actions">
+                <span className={`badge ${loki.status.toLowerCase()}`}>
+                  {loki.status}
+                </span>
+                <button
+                  className="secondary"
+                  onClick={() => void copyShareLink(loki.id)}
+                >
+                  {copyState}
+                </button>
+              </div>
+            </div>
+
+            <div className="share-box">
+              <span>Share this LOKI</span>
+              <code>{shareUrl(loki.id)}</code>
+              <button className="secondary" onClick={() => void copyShareLink(loki.id)}>
+                {copyState}
+              </button>
             </div>
 
             <div className="stats">
