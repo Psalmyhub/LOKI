@@ -120,7 +120,7 @@ export default function Home() {
   async function refreshMyLokis(published: LokiState[], wallet: string | null): Promise<string[]> {
     if (!wallet) {
       setMyLokiIds([]);
-      return;
+      return [];
     }
 
     const mine = await Promise.all(
