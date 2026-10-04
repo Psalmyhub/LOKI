@@ -318,7 +318,16 @@ export default function Home() {
                     <p><strong>User:</strong> <code>{item.player}</code></p>
                     <p><strong>Choice:</strong> {item.choice}</p>
                     <p><strong>Entered:</strong> {new Date(Number(item.entered_at) * 1000).toLocaleString()}</p>
-                    {loki.status === "SETTLED" && <p><strong>Result:</strong> {item.is_winner ? "Winner" : "Not selected"}</p>}
+                    {loki.status === "SETTLED" && (
+                      <p>
+                        <strong>Result:</strong>{" "}
+                        {item.settlement === "NO_WINNER_SHARE"
+                          ? "No winning choice — participant share"
+                          : item.is_winner
+                            ? "Winner"
+                            : "Not selected"}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
