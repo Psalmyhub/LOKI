@@ -7,6 +7,7 @@ import {
   getEntry,
   getLoki,
   claim,
+  extractContractReturnValue,
   type LokiEntry,
   type LokiState,
 } from "../lib/loki";
@@ -46,6 +47,7 @@ export default function Home() {
   const [status, setStatus] = useState("Connect your wallet to participate.");
   const [busy, setBusy] = useState(false);
   const [remaining, setRemaining] = useState("");
+  const [claimed, setClaimed] = useState(false);
 
   const isClosed = useMemo(() => {
     if (!loki) return false;
@@ -69,13 +71,35 @@ export default function Home() {
 
       setProvider(ethereum);
       setAccount(addresses[0]);
+      setClaimed(false);
       setStatus(`Connected: ${addresses[0]}`);
     } catch (error) {
       setStatus(String(error));
     }
   }
 
-  async function refresh() {
+  async function disconnect() {
+    try {
+      if (provider) {
+        try {
+          await provider.request({
+            method: "wallet_revokePermissions",
+            params: [{ eth_accounts: {} }],
+          });
+        } catch {
+          // Some injected wallets do not implement EIP-2255. Local logout
+          // still disconnects this dapp session.
+        }
+      }
+    } finally {
+      setProvider(null);
+      setAccount(null);
+      setClaimed(false);
+      setStatus("Wallet disconnected.");
+    }
+  }
+
+  async function refresh(options: { silent?: boolean } = {}) {
     try {
       const result = await getLoki(lokiId);
       setLoki(result);
@@ -85,10 +109,14 @@ export default function Home() {
         setSelectedChoice(result.choices[0]);
       }
 
-      setStatus(`Loaded ${lokiId}.`);
+      if (!options.silent) {
+        setStatus(`Loaded ${lokiId}.`);
+      }
     } catch (error) {
-      setLoki(null);
-      setStatus(`Unable to load ${lokiId}: ${String(error)}`);
+      if (!options.silent) {
+        setLoki(null);
+        setStatus(`Unable to load ${lokiId}: ${String(error)}`);
+      }
     }
   }
 
@@ -110,26 +138,74 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [loki]);
 
+  useEffect(() => {
+    if (!loki) return;
+
+    const timer = window.setInterval(() => {
+      void refresh({ silent: true });
+    }, 4000);
+
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lokiId, loki?.status, loki?.closes_at]);
+
   async function participate() {
     if (!provider || !account) { setStatus("Connect your wallet first."); return; }
     if (!loki) { setStatus("Load a LOKI first."); return; }
     if (!selectedChoice) { setStatus("Select an option."); return; }
     if (Date.now() / 1000 >= Number(loki.closes_at)) { setStatus("This LOKI has closed."); return; }
+
     setBusy(true);
     try {
       const writeClient = createWriteClient(account as `0x${string}`, provider);
       setStatus(`Submitting entry for ${selectedChoice}...`);
-      const receipt = await enterLoki(writeClient, loki.id, selectedChoice, BigInt(loki.entry_amount));
-      setStatus(`Entry submitted: ${String(receipt?.hash || receipt)}`);
-      await refresh();
-    } catch (error) { setStatus(String(error)); }
-    finally { setBusy(false); }
+
+      const receipt = await enterLoki(
+        writeClient,
+        loki.id,
+        selectedChoice,
+        BigInt(loki.entry_amount),
+      );
+
+      const createdEntryId = extractContractReturnValue(receipt);
+      if (createdEntryId) {
+        setEntryId(createdEntryId);
+        const createdEntry = await getEntry(createdEntryId);
+        setEntry(createdEntry);
+        setEntries((current) => [
+          ...current.filter((item) => item.id !== createdEntry.id),
+          createdEntry,
+        ]);
+      }
+
+      setStatus(
+        `Entry confirmed. Your public choice is ${selectedChoice} and is now on-chain.`,
+      );
+      await refresh({ silent: true });
+    } catch (error) {
+      setStatus(String(error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function loadEntries(currentLoki: LokiState) {
-    if (!currentLoki.entry_ids?.length) { setEntries([]); return; }
-    const results = await Promise.all(currentLoki.entry_ids.map((id) => getEntry(id)));
-    setEntries(results);
+    if (!currentLoki.entry_ids?.length) {
+      setEntries([]);
+      return;
+    }
+
+    const results = await Promise.all(
+      currentLoki.entry_ids.map(async (id) => {
+        try {
+          return await getEntry(id);
+        } catch {
+          return null;
+        }
+      }),
+    );
+
+    setEntries(results.filter((item): item is LokiEntry => item !== null));
   }
 
   async function doClaim() {
@@ -148,8 +224,9 @@ export default function Home() {
 
       const receipt = await claim(writeClient);
 
+      setClaimed(true);
       setStatus(
-        `Claim submitted: ${String(receipt?.hash || receipt)}`,
+        `Reward claimed: ${String(receipt?.hash || receipt)}`,
       );
     } catch (error) {
       setStatus(String(error));
@@ -175,8 +252,8 @@ export default function Home() {
             </a>
           )}
 
-          <button onClick={connect}>
-            {account ? "Wallet connected" : "Connect wallet"}
+          <button onClick={account ? disconnect : connect}>
+            {account ? "Disconnect wallet" : "Connect wallet"}
           </button>
         </div>
       </header>
@@ -244,9 +321,11 @@ export default function Home() {
                 <strong>
                   {loki.status === "OPEN" && !isClosed
                     ? `Closes in ${remaining}`
-                    : loki.status === "RANDOMIZED"
-                      ? "Randomized"
-                      : "Closed — random selection in progress"}
+                    : loki.status === "OPEN"
+                      ? "LOKI closed — waiting for randomness"
+                      : loki.status === "RANDOMIZED"
+                        ? `Randomness verified — ${loki.random_choice}`
+                        : "Winners finalized"}
                 </strong>
               </div>
             </div>
@@ -279,6 +358,53 @@ export default function Home() {
                 Enter LOKI
               </button>
             </div>
+          </section>
+
+          <section className="card">
+            <p className="eyebrow">LOKI SYSTEM</p>
+            <h2>Live progress</h2>
+            <div className="verification">
+              <div>
+                <span>1. LOKI</span>
+                <strong>{loki.status === "OPEN" ? "OPEN" : "CLOSED"}</strong>
+              </div>
+              <div>
+                <span>2. Randomness</span>
+                <strong>
+                  {loki.status === "OPEN"
+                    ? isClosed
+                      ? "CLOSING — CONSENSUS PENDING"
+                      : "WAITING FOR CLOSE"
+                    : "VERIFIED"}
+                </strong>
+              </div>
+              <div>
+                <span>3. Random choice</span>
+                <strong>{loki.random_choice || "Pending GenLayer judgment"}</strong>
+              </div>
+              <div>
+                <span>4. Winners review</span>
+                <strong>
+                  {loki.status === "SETTLED"
+                    ? "COMPLETE"
+                    : loki.status === "RANDOMIZED"
+                      ? "READY"
+                      : "WAITING FOR RANDOMNESS"}
+                </strong>
+              </div>
+              <div>
+                <span>5. Winners</span>
+                <strong>
+                  {loki.status === "SETTLED"
+                    ? `${loki.winner_count} winner(s)`
+                    : "Waiting for settlement"}
+                </strong>
+              </div>
+            </div>
+            <p className="muted">
+              The page checks the on-chain LOKI state every 4 seconds, so you can
+              watch the transition without manually refreshing.
+            </p>
           </section>
 
           {loki.status === "RANDOMIZED" && (
@@ -334,21 +460,28 @@ export default function Home() {
             )}
           </section>
 
-          <section className="card">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">CLAIM</p>
-                <h2>Claim settlement</h2>
+          {loki.status === "SETTLED" && entry && (
+            entry.is_winner || entry.settlement === "NO_WINNER_SHARE"
+          ) && (
+            <section className="card result-card">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">REWARD</p>
+                  <h2>{claimed ? "Reward claimed" : "Claim reward"}</h2>
+                </div>
               </div>
-            </div>
-
-            <button
-              onClick={doClaim}
-              disabled={busy || !account}
-            >
-              Claim
-            </button>
-          </section>
+              <p className="muted">
+                {entry.settlement === "NO_WINNER_SHARE"
+                  ? "There was no matching winning choice. Your share of the post-fee participant pool is available."
+                  : "Your choice matched the verified random choice. Your winner reward is available."}
+              </p>
+              {!claimed && (
+                <button onClick={doClaim} disabled={busy || !account}>
+                  Claim reward
+                </button>
+              )}
+            </section>
+          )}
         </>
       )}
 
