@@ -98,6 +98,25 @@ export default function AdminPage() {
     }
   }
 
+  async function disconnect() {
+    try {
+      if (provider) {
+        try {
+          await provider.request({
+            method: "wallet_revokePermissions",
+            params: [{ eth_accounts: {} }],
+          });
+        } catch {
+          // Some injected wallets do not implement EIP-2255.
+        }
+      }
+    } finally {
+      setProvider(null);
+      setAccount(null);
+      setStatus("Wallet disconnected.");
+    }
+  }
+
   async function loadLoki(id = lokiId) {
     if (!id) return;
 
@@ -259,8 +278,15 @@ export default function AdminPage() {
     if (loki.status !== "OPEN") return;
 
     const check = async () => {
-      if (Date.now() / 1000 < Number(loki.closes_at)) return;
-      await close();
+      if (loki.status === "OPEN") {
+        if (Date.now() / 1000 < Number(loki.closes_at)) return;
+        await close();
+        return;
+      }
+
+      if (loki.status === "RANDOMIZED" && !loki.settled && !busy) {
+        await settle();
+      }
     };
 
     const timer = window.setInterval(() => {
@@ -325,6 +351,9 @@ export default function AdminPage() {
             Player page
           </a>
           <span className="wallet-chip">Publisher authorized</span>
+          <button className="secondary" onClick={disconnect}>
+            Disconnect wallet
+          </button>
         </div>
       </header>
 
@@ -448,8 +477,8 @@ export default function AdminPage() {
                       {loki.status === "OPEN"
                         ? `in ${remaining}`
                         : loki.status === "RANDOMIZED"
-                          ? "Randomized"
-                          : "Closed"}
+                          ? "Randomness verified — settling"
+                          : "Winners finalized"}
                     </strong>
                   </div>
                 </div>
@@ -486,8 +515,8 @@ export default function AdminPage() {
 
       {loki && (
         <section className="card">
-          <p className="eyebrow">RANDOMNESS</p>
-          <h2>Verified randomness</h2>
+          <p className="eyebrow">LOKI SYSTEM</p>
+          <h2>Close → Randomness → Winners</h2>
 
           <div className="verification">
             <div>
