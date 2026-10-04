@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LOKI_CONTRACT_ADDRESS, readClient, extractContractReturnValue } from "../lib/genlayer";
+import { LOKI_CONTRACT_ADDRESS, extractContractReturnValue, ensureStudionet, type WalletProvider } from "../lib/genlayer";
 import {
   enterLoki,
   getEntry,
@@ -39,7 +39,8 @@ const formatRemaining = (closesAt: string) => {
 export default function Home() {
   const [provider, setProvider] = useState<EthereumProvider | null>(null);
   const [account, setAccount] = useState<string | null>(null);
-  const [lokiId, setLokiId] = useState("loki-1");
+  const [lokiId, setLokiId] = useState("");
+  const [availableLokis, setAvailableLokis] = useState<LokiState[]>([]);
   const [loki, setLoki] = useState<LokiState | null>(null);
   const [entry, setEntry] = useState<LokiEntry | null>(null);
   const [selectedChoice, setSelectedChoice] = useState("");
@@ -57,25 +58,21 @@ export default function Home() {
 
   async function connect() {
     const ethereum = window.ethereum;
-
     if (!ethereum) {
       setStatus("No injected wallet found. Install or enable your wallet.");
       return;
     }
-
     try {
-      const addresses = (await ethereum.request({
-        method: "eth_requestAccounts",
-      })) as string[];
-
+      setStatus("Connecting wallet and checking GenLayer Studionet...");
+      await ensureStudionet(ethereum);
+      const addresses = (await ethereum.request({ method: "eth_requestAccounts" })) as string[];
       if (!addresses[0]) throw new Error("No wallet account returned.");
-
       setProvider(ethereum);
       setAccount(addresses[0]);
       setClaimed(false);
-      setStatus(`Connected: ${addresses[0]}`);
+      setStatus(`Connected to GenLayer Studionet: ${addresses[0]}`);
     } catch (error) {
-      setStatus(String(error));
+      setStatus(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -100,19 +97,41 @@ export default function Home() {
     }
   }
 
+  async function discoverLokis() {
+    const ids = Array.from({ length: 25 }, (_, index) => `loki-${index + 1}`);
+    const results = await Promise.all(ids.map(async (id) => {
+      try { return await getLoki(id); } catch { return null; }
+    }));
+    const published = results
+      .filter((item): item is LokiState => item !== null)
+      .filter((item) => item.status === "OPEN" && Number(item.closes_at) > Date.now() / 1000)
+      .sort((a, b) => Number(a.closes_at) - Number(b.closes_at));
+    setAvailableLokis(published);
+    return published;
+  }
+
   async function refresh(options: { silent?: boolean } = {}) {
+    if (!lokiId) {
+      const published = await discoverLokis();
+      const first = published[0];
+      if (first) {
+        setLokiId(first.id);
+        setLoki(first);
+        setSelectedChoice(first.choices[0] ?? "");
+        await loadEntries(first);
+        if (!options.silent) setStatus(`Loaded ${first.id}.`);
+      } else if (!options.silent) {
+        setLoki(null);
+        setStatus("No open LOKIs are currently available.");
+      }
+      return;
+    }
     try {
       const result = await getLoki(lokiId);
       setLoki(result);
       await loadEntries(result);
-
-      if (result.choices.length > 0 && !selectedChoice) {
-        setSelectedChoice(result.choices[0]);
-      }
-
-      if (!options.silent) {
-        setStatus(`Loaded ${lokiId}.`);
-      }
+      if (result.choices.length > 0 && !selectedChoice) setSelectedChoice(result.choices[0]);
+      if (!options.silent) setStatus(`Loaded ${lokiId}.`);
     } catch (error) {
       if (!options.silent) {
         setLoki(null);
@@ -122,9 +141,17 @@ export default function Home() {
   }
 
   useEffect(() => {
-    void refresh();
+    void discoverLokis().then((published) => {
+      const first = published[0];
+      if (first) {
+        setLokiId(first.id);
+        setLoki(first);
+        setSelectedChoice(first.choices[0] ?? "");
+        void loadEntries(first);
+      }
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lokiId]);
+  }, []);
 
   useEffect(() => {
     if (!loki) return;
@@ -212,9 +239,43 @@ export default function Home() {
     loki?.settled,
   ]);
 
+  useEffect(() => {
+    const ethereum = window.ethereum;
+    if (!ethereum?.on) return;
+
+    const handleAccountsChanged = (accounts: unknown) => {
+      const next = Array.isArray(accounts) ? accounts[0] : undefined;
+      if (typeof next === "string" && next) {
+        setAccount(next);
+        setClaimed(false);
+        setStatus(`Wallet account changed: ${next}`);
+      } else {
+        setProvider(null);
+        setAccount(null);
+        setStatus("Wallet disconnected.");
+      }
+    };
+
+    const handleChainChanged = (chainId: unknown) => {
+      if (String(chainId).toLowerCase() !== "0xf22f") {
+        setProvider(null);
+        setAccount(null);
+        setStatus("Wallet network changed. Please reconnect to GenLayer Studionet (chain 61999).");
+      }
+    };
+
+    ethereum.on("accountsChanged", handleAccountsChanged);
+    ethereum.on("chainChanged", handleChainChanged);
+
+    return () => {
+      ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
+      ethereum.removeListener?.("chainChanged", handleChainChanged);
+    };
+  }, []);
+
   async function participate() {
     if (!provider || !account) { setStatus("Connect your wallet first."); return; }
-    if (!loki) { setStatus("Load a LOKI first."); return; }
+    if (!loki) { setStatus("Select an available LOKI first."); return; }
     if (!selectedChoice) { setStatus("Select an option."); return; }
     if (Date.now() / 1000 >= Number(loki.closes_at)) { setStatus("This LOKI has closed."); return; }
 
@@ -350,26 +411,29 @@ export default function Home() {
       <section className="card">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">LOKI</p>
-            <h2>Open a LOKI</h2>
+            <p className="eyebrow">AVAILABLE LOKIS</p>
+            <h2>Open LOKIs</h2>
           </div>
-
-          <button
-            className="secondary"
-            onClick={() => void refresh()}
-            disabled={busy}
-          >
-            Refresh
-          </button>
+          <button className="secondary" onClick={() => void refresh()} disabled={busy}>Refresh</button>
         </div>
-
-        <div className="lookup-row">
-          <input
-            value={lokiId}
-            onChange={(event) => setLokiId(event.target.value)}
-            placeholder="loki-1"
-          />
-        </div>
+        {availableLokis.length === 0 ? (
+          <p className="muted">No open LOKIs are currently available.</p>
+        ) : (
+          <div className="choices">
+            {availableLokis.map((item) => (
+              <button key={item.id} className={lokiId === item.id ? "choice selected" : "choice"} onClick={() => {
+                setLokiId(item.id);
+                setLoki(item);
+                setSelectedChoice(item.choices[0] ?? "");
+                void loadEntries(item);
+              }}>
+                <strong>{item.title}</strong>
+                <span>{item.category} · {item.id} · {item.participant_count} participant(s)</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="muted">LOKIs are published from the Publisher dashboard. The player view no longer exposes an editable internal LOKI ID.</p>
       </section>
 
       {loki && (
