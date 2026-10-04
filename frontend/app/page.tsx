@@ -16,9 +16,7 @@ import { createWriteClient } from "../lib/genlayer";
 
 const CONTRACT = LOKI_CONTRACT_ADDRESS;
 
-type EthereumProvider = {
-  request(args: { method: string; params?: unknown[] }): Promise<any>;
-};
+type EthereumProvider = WalletProvider;
 
 const formatRemaining = (closesAt: string) => {
   const seconds = Math.max(
