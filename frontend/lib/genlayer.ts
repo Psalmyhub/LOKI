@@ -6,8 +6,7 @@ import {
 } from "genlayer-js/types";
 
 export const LOKI_CONTRACT_ADDRESS =
-  (process.env.NEXT_PUBLIC_LOKI_CONTRACT_ADDRESS ||
-    "0x5F14155aE0779b9a82D599e5E660483714A332b5") as `0x${string}`;
+  "0x8bbC34e492b5f9c3DA16Eb49ecbd2a99268F368F" as `0x${string}`;
 
 export const LOKI_CHAIN = studionet;
 export const LOKI_CHAIN_ID = 61999;
@@ -57,6 +56,7 @@ export async function waitForLokiTransaction(
 
   return receipt;
 }
+
 export function extractContractReturnValue(
   receipt: unknown,
 ): string | null {
