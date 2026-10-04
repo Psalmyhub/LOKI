@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LOKI_CONTRACT_ADDRESS, extractContractReturnValue, ensureStudionet, type WalletProvider } from "../lib/genlayer";
 import {
   enterLoki,
@@ -48,6 +48,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [remaining, setRemaining] = useState("");
   const [claimed, setClaimed] = useState(false);
+  const progressInFlight = useRef(false);
 
   const isClosed = useMemo(() => {
     if (!loki) return false;
@@ -179,6 +180,9 @@ export default function Home() {
     if (!provider || !account || !loki) return;
 
     const progress = async () => {
+      if (progressInFlight.current) return;
+      progressInFlight.current = true;
+
       try {
         if (
           loki.status === "OPEN" &&
@@ -216,6 +220,8 @@ export default function Home() {
         // Another caller may have closed/settled first. The next poll
         // refreshes the authoritative on-chain state.
         await refresh({ silent: true });
+      } finally {
+        progressInFlight.current = false;
       }
     };
 
