@@ -35,7 +35,7 @@ LOKI is a GenLayer-based public-choice prediction protocol.
 - Studionet chain ID: `61999`
 - RPC: `https://studio.genlayer.com/api`
 - Active deployed LOKI contract: `0x8bbC34e492b5f9c3DA16Eb49ecbd2a99268F368F`
-- Publisher wallet configured by the frontend: `0xB41f7CcF919515a4741C7A7Ad43cFfCd56A20Ee31`
+- Publisher wallet configured by the frontend: `0xB41f7CcF919515a4741C7AAd43cFfCd56A20Ee31`
 
 ## Important deployment note
 
