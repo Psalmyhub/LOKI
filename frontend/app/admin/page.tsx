@@ -424,8 +424,15 @@ export default function AdminPage() {
 
       {published && loki && (
         <section className="card">
-          <p className="eyebrow">PUBLISHED</p>
-          <h2>LOKI PUBLISHED</h2>
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">PUBLISHED</p>
+              <h2>LOKI PUBLISHED</h2>
+            </div>
+            <button className="secondary" onClick={() => void copyShareLink(loki.id)}>
+              {copyState}
+            </button>
+          </div>
           <p className="muted">
             Your LOKI is now published and available for participants to join.
           </p>
@@ -442,15 +449,7 @@ export default function AdminPage() {
               </div>
             </div>
 
-            <label>
-              Share link
-              <input value={shareUrl(loki.id)} readOnly />
-            </label>
-
             <div className="actions">
-              <button onClick={() => void copyShareLink(loki.id)}>
-                {copyState}
-              </button>
               <a className="secondary-link" href={shareUrl(loki.id)}>
                 Open player page
               </a>
