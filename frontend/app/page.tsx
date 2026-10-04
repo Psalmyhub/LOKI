@@ -179,7 +179,7 @@ export default function Home() {
       if (first) {
         setLokiId(first.id);
         setLoki(first);
-        setSelectedChoice(first.choices[0] ?? "");
+        setSelectedChoice("");
         await loadEntries(first);
         if (!options.silent) setStatus(`Loaded ${first.id}.`);
       } else if (!options.silent) {
