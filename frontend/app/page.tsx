@@ -97,14 +97,18 @@ export default function Home() {
   }
 
   async function discoverLokis() {
-    const ids = Array.from({ length: 25 }, (_, index) => `loki-${index + 1}`);
+    const ids = Array.from({ length: 100 }, (_, index) => `loki-${index + 1}`);
     const results = await Promise.all(ids.map(async (id) => {
       try { return await getLoki(id); } catch { return null; }
     }));
     const published = results
       .filter((item): item is LokiState => item !== null)
-      .filter((item) => item.status === "OPEN" && Number(item.closes_at) > Date.now() / 1000)
-      .sort((a, b) => Number(a.closes_at) - Number(b.closes_at));
+      .sort((a, b) => {
+        const aOpen = a.status === "OPEN" && Number(a.closes_at) > Date.now() / 1000;
+        const bOpen = b.status === "OPEN" && Number(b.closes_at) > Date.now() / 1000;
+        if (aOpen !== bOpen) return aOpen ? -1 : 1;
+        return Number(b.id.replace("loki-", "")) - Number(a.id.replace("loki-", ""));
+      });
     setAvailableLokis(published);
     return published;
   }
@@ -121,7 +125,7 @@ export default function Home() {
         if (!options.silent) setStatus(`Loaded ${first.id}.`);
       } else if (!options.silent) {
         setLoki(null);
-        setStatus("No open LOKIs are currently available.");
+        setStatus("No published LOKIs are currently available.");
       }
       return;
     }
@@ -169,6 +173,7 @@ export default function Home() {
     if (!loki) return;
 
     const timer = window.setInterval(() => {
+      void discoverLokis();
       void refresh({ silent: true });
     }, 4000);
 
@@ -415,13 +420,13 @@ export default function Home() {
       <section className="card">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">AVAILABLE LOKIS</p>
-            <h2>Open LOKIs</h2>
+            <p className="eyebrow">PUBLISHED LOKIS</p>
+            <h2>LOKI market</h2>
           </div>
           <button className="secondary" onClick={() => void refresh()} disabled={busy}>Refresh</button>
         </div>
         {availableLokis.length === 0 ? (
-          <p className="muted">No open LOKIs are currently available.</p>
+          <p className="muted">No published LOKIs are currently available.</p>
         ) : (
           <div className="choices">
             {availableLokis.map((item) => (
@@ -432,12 +437,12 @@ export default function Home() {
                 void loadEntries(item);
               }}>
                 <strong>{item.title}</strong>
-                <span>{item.category} · {item.id} · {item.participant_count} participant(s)</span>
+                <span>{item.category} · {item.id} · {item.status} · {item.participant_count} participant(s)</span>
               </button>
             ))}
           </div>
         )}
-        <p className="muted">LOKIs are published from the Publisher dashboard. The player view no longer exposes an editable internal LOKI ID.</p>
+        <p className="muted">Published LOKIs remain visible after closing and settlement. Only OPEN LOKIs can accept new entries; finalized LOKIs remain viewable while newer LOKIs are published.</p>
       </section>
 
       {loki && (
