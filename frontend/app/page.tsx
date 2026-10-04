@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LOKI_CONTRACT_ADDRESS, readClient } from "../lib/genlayer";
+import { LOKI_CONTRACT_ADDRESS, readClient, extractContractReturnValue } from "../lib/genlayer";
 import {
   enterLoki,
   getEntry,
@@ -9,7 +9,6 @@ import {
   closeLoki,
   settleLoki,
   claim,
-  extractContractReturnValue,
   type LokiEntry,
   type LokiState,
 } from "../lib/loki";
@@ -357,7 +356,7 @@ export default function Home() {
 
           <button
             className="secondary"
-            onClick={refresh}
+            onClick={() => void refresh()}
             disabled={busy}
           >
             Refresh
