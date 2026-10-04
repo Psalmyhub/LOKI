@@ -282,70 +282,31 @@ export default function Home() {
   }, [account]);
 
   useEffect(() => {
-    if (!provider || !account || !loki) return;
+    if (!loki) return;
 
-    const progress = async () => {
-      if (progressInFlight.current) return;
-      progressInFlight.current = true;
-
-      try {
-        if (
-          loki.status === "OPEN" &&
-          Date.now() / 1000 >= Number(loki.closes_at)
-        ) {
-          const writeClient = createWriteClient(
-            account as `0x${string}`,
-            provider,
-          );
-          setStatus("LOKI closed. Starting GenLayer randomness consensus...");
-          await closeLoki(writeClient, loki.id);
-          await refresh({ silent: true });
-          return;
-        }
-
-        if (loki.status === "RANDOMIZED" && !loki.settled) {
-          const writeClient = createWriteClient(
-            account as `0x${string}`,
-            provider,
-          );
-          setStatus(
-            `Randomness verified: ${loki.random_choice}. Reviewing winners...`,
-          );
-          await settleLoki(writeClient, loki.id);
-          await refresh({ silent: true });
-          return;
-        }
-
-        if (loki.status === "SETTLED") {
-          setStatus(
-            `Winners finalized: ${loki.winner_count}. Settlement is complete.`,
-          );
-        }
-      } catch {
-        // Another caller may have closed/settled first. The next poll
-        // refreshes the authoritative on-chain state.
-        await refresh({ silent: true });
-      } finally {
-        progressInFlight.current = false;
-      }
-    };
-
-    const timer = window.setInterval(() => {
-      void progress();
-    }, 4000);
-
-    void progress();
-
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Player pages are read-only monitors. Connecting a wallet must never
+    // submit close_loki() or settle_loki() on the user's behalf.
+    // Those are state-changing transactions and therefore require an
+    // explicit caller/keeper action rather than a wallet connection.
+    if (loki.status === "SETTLED") {
+      setStatus(
+        `Winners finalized: ${loki.winner_count}. Settlement is complete.`,
+      );
+    } else if (loki.status === "RANDOMIZED" && loki.random_choice) {
+      setStatus(
+        `Randomness verified: ${loki.random_choice}. Settlement pending.`,
+      );
+    } else if (
+      loki.status === "OPEN" &&
+      Date.now() / 1000 >= Number(loki.closes_at)
+    ) {
+      setStatus("LOKI closed. Waiting for the permissionless close/randomness transaction.");
+    }
   }, [
-    provider,
-    account,
-    loki?.id,
     loki?.status,
-    loki?.closes_at,
     loki?.random_choice,
-    loki?.settled,
+    loki?.winner_count,
+    loki?.closes_at,
   ]);
 
   useEffect(() => {
