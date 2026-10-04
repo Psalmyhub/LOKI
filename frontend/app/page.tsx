@@ -117,7 +117,7 @@ export default function Home() {
     return published;
   }
 
-  async function refreshMyLokis(published: LokiState[], wallet: string | null) {
+  async function refreshMyLokis(published: LokiState[], wallet: string | null): Promise<string[]> {
     if (!wallet) {
       setMyLokiIds([]);
       return;
