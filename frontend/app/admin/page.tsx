@@ -125,9 +125,36 @@ export default function AdminPage() {
     const ethereum = window.ethereum;
     if (!ethereum?.on) return;
 
+    const syncConnectedAccount = async () => {
+      try {
+        const accounts = (await ethereum.request({
+          method: "eth_accounts",
+        })) as string[];
+        const next = accounts[0];
+
+        if (!next) {
+          setProvider(null);
+          setAccount(null);
+          return;
+        }
+
+        setProvider(ethereum);
+        setAccount(next);
+        setStatus(
+          next.toLowerCase() === ADMIN_WALLET.toLowerCase()
+            ? "Publisher wallet authorized."
+            : "Connected wallet is not authorized for publisher controls.",
+        );
+      } catch {
+        // The explicit Connect button remains available if the wallet blocks
+        // passive account access.
+      }
+    };
+
     const handleAccountsChanged = (accounts: unknown) => {
       const next = Array.isArray(accounts) ? accounts[0] : undefined;
       setAccount(typeof next === "string" && next ? next : null);
+      setProvider(typeof next === "string" && next ? ethereum : null);
       if (typeof next === "string" && next) {
         setStatus(
           next.toLowerCase() === ADMIN_WALLET.toLowerCase()
@@ -135,7 +162,6 @@ export default function AdminPage() {
             : "Connected wallet is not authorized for publisher controls.",
         );
       } else {
-        setProvider(null);
         setStatus("Wallet disconnected.");
       }
     };
@@ -145,11 +171,14 @@ export default function AdminPage() {
         setProvider(null);
         setAccount(null);
         setStatus("Wallet network changed. Please reconnect to GenLayer Studionet (chain 61999).");
+      } else {
+        void syncConnectedAccount();
       }
     };
 
     ethereum.on("accountsChanged", handleAccountsChanged);
     ethereum.on("chainChanged", handleChainChanged);
+    void syncConnectedAccount();
 
     return () => {
       ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
