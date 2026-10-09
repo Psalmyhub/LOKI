@@ -15,6 +15,7 @@ import {
 import { createWriteClient } from "../lib/genlayer";
 
 const CONTRACT = LOKI_CONTRACT_ADDRESS;
+const ADMIN_WALLET = "0xB41f7CcF919515a4741C7AAd43cFfCd56A20Ee31";
 
 type EthereumProvider = WalletProvider;
 
@@ -309,6 +310,24 @@ export default function Home() {
     loki?.closes_at,
   ]);
 
+  // Detect an already-connected wallet on page load without opening a prompt
+  // or submitting any transaction. This lets the publisher see the Admin link.
+  useEffect(() => {
+    const ethereum = window.ethereum;
+    if (!ethereum) return;
+
+    void ethereum.request({ method: "eth_accounts" }).then((value) => {
+      const addresses = Array.isArray(value) ? value : [];
+      const next = addresses[0];
+      if (typeof next === "string" && next) {
+        setProvider(ethereum);
+        setAccount(next);
+      }
+    }).catch(() => {
+      // The user can still connect explicitly using the wallet button.
+    });
+  }, []);
+
   useEffect(() => {
     const ethereum = window.ethereum;
     if (!ethereum?.on) return;
@@ -492,6 +511,9 @@ export default function Home() {
         </div>
 
         <div className="header-actions">
+          {account?.toLowerCase() === ADMIN_WALLET.toLowerCase() && (
+            <a className="secondary" href="/admin">Admin Dashboard</a>
+          )}
           <button onClick={account ? disconnect : connect}>
             {account ? "Disconnect wallet" : "Connect wallet"}
           </button>
