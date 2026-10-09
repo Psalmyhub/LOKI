@@ -40,6 +40,8 @@ export default function Home() {
   const [account, setAccount] = useState<string | null>(null);
   const [lokiId, setLokiId] = useState("");
   const [availableLokis, setAvailableLokis] = useState<LokiState[]>([]);
+  const availableLokisRef = useRef<LokiState[]>([]);
+  availableLokisRef.current = availableLokis;
   const [loki, setLoki] = useState<LokiState | null>(null);
   const [entry, setEntry] = useState<LokiEntry | null>(null);
   const [selectedChoice, setSelectedChoice] = useState("");
@@ -109,7 +111,7 @@ export default function Home() {
       try { return await getLoki(id); } catch { return null; }
     }));
     const discovered = results.filter((item): item is LokiState => item !== null);
-    const merged = new Map(availableLokis.map((item) => [item.id, item]));
+    const merged = new Map(availableLokisRef.current.map((item) => [item.id, item]));
     for (const item of discovered) merged.set(item.id, item);
     const published = Array.from(merged.values())
       .sort((a, b) => {
