@@ -421,19 +421,65 @@ export default function Home() {
       );
 
       const createdEntryId = extractContractReturnValue(receipt);
-      if (createdEntryId) {
-        setEntryId(createdEntryId);
-        const createdEntry = await getEntry(createdEntryId);
-        setEntry(createdEntry);
-        setEntries((current) => [
-          ...current.filter((item) => item.id !== createdEntry.id),
-          createdEntry,
-        ]);
+      if (createdEntryId) setEntryId(createdEntryId);
+
+      // A finalized write can become readable through the public RPC slightly
+      // later. Re-read the LOKI and its entry IDs before declaring the public
+      // participation list synchronized.
+      let latestLoki: LokiState | null = null;
+      let acknowledged = false;
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        try {
+          latestLoki = await getLoki(loki.id);
+          setLoki(latestLoki);
+          setAvailableLokis((current) => {
+            const next = current.filter((item) => item.id !== latestLoki!.id);
+            next.push(latestLoki!);
+            return next.sort((a, b) => {
+              const aOpen = a.status === "OPEN" && Number(a.closes_at) > Date.now() / 1000;
+              const bOpen = b.status === "OPEN" && Number(b.closes_at) > Date.now() / 1000;
+              if (aOpen !== bOpen) return aOpen ? -1 : 1;
+              return Number(b.id.replace("loki-", "")) - Number(a.id.replace("loki-", ""));
+            });
+          });
+          await loadEntries(latestLoki);
+          const ids = latestLoki.entry_ids ?? [];
+          if (
+            (createdEntryId && ids.includes(createdEntryId)) ||
+            ids.some((id) => id === createdEntryId) ||
+            Number(latestLoki.participant_count) > Number(loki.participant_count)
+          ) {
+            acknowledged = true;
+            break;
+          }
+        } catch {
+          // Keep retrying the same read-only verification; never resubmit entry.
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
       }
 
-      setStatus(
-        `Entry confirmed. Your public choice is ${selectedChoice} and is now on-chain.`,
-      );
+      if (createdEntryId) {
+        try {
+          const createdEntry = await getEntry(createdEntryId);
+          setEntry(createdEntry);
+          setEntries((current) => [
+            ...current.filter((item) => item.id !== createdEntry.id),
+            createdEntry,
+          ]);
+        } catch {
+          // Public list polling will retry this entry on the next refresh.
+        }
+      }
+
+      if (acknowledged) {
+        setStatus(
+          `Entry confirmed and acknowledged. Your public choice is ${selectedChoice}; participant count and public participation have refreshed.`,
+        );
+      } else {
+        setStatus(
+          `Entry transaction finalized for ${selectedChoice}. The public RPC has not returned the updated participation data yet; the page will keep retrying automatically.`,
+        );
+      }
       await refresh({ silent: true });
     } catch (error) {
       setStatus(String(error));
@@ -443,13 +489,18 @@ export default function Home() {
   }
 
   async function loadEntries(currentLoki: LokiState) {
-    if (!currentLoki.entry_ids?.length) {
-      setEntries([]);
+    const ids = currentLoki.entry_ids ?? [];
+    if (ids.length === 0) {
+      // Do not erase already displayed participation when a read RPC briefly
+      // returns an older snapshot for the same LOKI.
+      setEntries((current) =>
+        current.filter((item) => item.loki_id === currentLoki.id),
+      );
       return;
     }
 
     const results = await Promise.all(
-      currentLoki.entry_ids.map(async (id) => {
+      ids.map(async (id) => {
         try {
           return await getEntry(id);
         } catch {
@@ -461,14 +512,29 @@ export default function Home() {
     const loadedEntries = results.filter(
       (item): item is LokiEntry => item !== null,
     );
-    setEntries(loadedEntries);
+    // Merge successful reads with known entries for this LOKI. If one
+    // get_entry call is temporarily unavailable, keep that participant visible
+    // and retry on the next refresh rather than dropping their public record.
+    setEntries((current) => {
+      const merged = new Map(
+        current
+          .filter((item) => item.loki_id === currentLoki.id)
+          .map((item) => [item.id, item]),
+      );
+      for (const item of loadedEntries) merged.set(item.id, item);
+      return Array.from(merged.values()).sort(
+        (a, b) => Number(a.entered_at) - Number(b.entered_at),
+      );
+    });
 
     if (account) {
       const mine = loadedEntries.find(
         (item) => item.player.toLowerCase() === account.toLowerCase(),
       );
-      setEntry(mine ?? null);
-      setEntryId(mine?.id ?? "");
+      if (mine) {
+        setEntry(mine);
+        setEntryId(mine.id);
+      }
     }
   }
 
