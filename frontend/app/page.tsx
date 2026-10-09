@@ -102,12 +102,16 @@ export default function Home() {
   }
 
   async function discoverLokis() {
+    // LOKI IDs are sequential. Scan the known range and merge results so a
+    // transient RPC failure never clears LOKIs already displayed to users.
     const ids = Array.from({ length: 100 }, (_, index) => `loki-${index + 1}`);
     const results = await Promise.all(ids.map(async (id) => {
       try { return await getLoki(id); } catch { return null; }
     }));
-    const published = results
-      .filter((item): item is LokiState => item !== null)
+    const discovered = results.filter((item): item is LokiState => item !== null);
+    const merged = new Map(availableLokis.map((item) => [item.id, item]));
+    for (const item of discovered) merged.set(item.id, item);
+    const published = Array.from(merged.values())
       .sort((a, b) => {
         const aOpen = a.status === "OPEN" && Number(a.closes_at) > Date.now() / 1000;
         const bOpen = b.status === "OPEN" && Number(b.closes_at) > Date.now() / 1000;
@@ -258,8 +262,8 @@ export default function Home() {
   }, [loki]);
 
   useEffect(() => {
-    if (!loki) return;
-
+    // Keep discovering published LOKIs even when the page starts with none
+    // loaded. This makes a newly published LOKI appear without a manual refresh.
     const timer = window.setInterval(() => {
       void (async () => {
         const published = await discoverLokis();
@@ -270,7 +274,7 @@ export default function Home() {
 
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lokiId, loki?.status, loki?.closes_at]);
+  }, [lokiId, loki?.status, loki?.closes_at, account, lokiFilter]);
 
   useEffect(() => {
     const sync = async () => {
